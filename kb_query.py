@@ -1,5 +1,6 @@
 """
-WorkBuddy 知识库引擎 — OCR → 向量检索 → API大模型合成 → HTML/PDF报告
+KB Query Engine - 中文技术文档知识库问答系统
+版本: v0.1.0
 
 架构:
   摄入: 图片/文本 → PaddleOCR/PPStructureV3 → 分块嵌入 → Qdrant
@@ -21,9 +22,9 @@ WorkBuddy 知识库引擎 — OCR → 向量检索 → API大模型合成 → HT
   python kb_query.py --ocr "photo.jpg" --engine structured  # PPStructureV3 结构化识别（公式+表格+图表）
 
 环境变量（问答模式需配置 API）:
-  KB_LLM_BASE_URL    LLM API 地址（默认 http://localhost:11434/v1）
+  KB_LLM_BASE_URL    LLM API 地址（默认 https://api.deepseek.com/v1）
   KB_LLM_API_KEY      API Key（需自行申请）
-  KB_LLM_MODEL        模型名（默认 gpt-4o）
+  KB_LLM_MODEL        模型名（默认 deepseek-chat）
 """
 import requests
 import json
@@ -37,6 +38,8 @@ import hashlib
 import uuid
 from datetime import datetime, timezone
 import tempfile
+
+__version__ = "0.1.0"
 
 try:
     from fpdf import FPDF

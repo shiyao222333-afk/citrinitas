@@ -1,0 +1,57 @@
+name: update-claude-specs
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"  # weekly on Monday at 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install UV and set Python version
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Update Claude specs and lock file
+        run: uv run python scripts/update_claude_specs.py
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b chore/update-claude-specs
+          git add .
+          git diff --staged --quiet && exit 0
+          git commit -m "chore(deps): update Claude specs and anthropic SDK"
+          git push --force origin chore/update-claude-specs
+          echo "CHANGES=true" >> "$GITHUB_ENV"
+
+      - name: Create draft PR
+        if: env.CHANGES == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh pr view chore/update-claude-specs --json number &>/dev/null; then
+            echo "PR already exists, branch updated via force push"
+          else
+            gh pr create \
+              --title "chore(deps): update Claude specs and anthropic SDK" \
+              --body "Automated update of:
+            - \`OPENAPI_SPEC_URL\` in \`tests/models/anthropic/test_openapi_schema.py\` — fetched from [\`anthropic-sdk-typescript/.stats.yml\`](https://raw.githubusercontent.com/anthropics/anthropic-sdk-typescript/main/.stats.yml)
+            - \`anthropic\` minimum version in \`pyproject.toml\` — fetched from [PyPI](https://pypi.org/pypi/anthropic/json)
+            - \`uv.lock\` re-resolved via \`uv lock\`
+
+            _Opened automatically by the \`update-claude-specs\` workflow — review and merge when tests pass._" \
+              --draft \
+              --label dependencies \
+              --base main \
+              --head chore/update-claude-specs
+          fi
