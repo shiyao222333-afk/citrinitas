@@ -1,6 +1,6 @@
 """
 KB Query Engine - 中文技术文档知识库问答系统
-版本: v0.1.0
+版本: v0.4.0 — 智能摄入 + LLM 自动分类
 
 架构:
   摄入: 图片/文本 → PaddleOCR/PPStructureV3 → 分块嵌入 → Qdrant
@@ -43,7 +43,7 @@ import uuid
 from datetime import datetime, timezone
 import tempfile
 
-__version__ = "0.1.0"
+__version__ = "0.4.0"
 
 try:
     from fpdf import FPDF
@@ -77,7 +77,7 @@ OLLAMA_URL = "http://localhost:11434"
 QDRANT_URL = "http://localhost:6333"
 EMBED_MODEL = os.environ.get("KB_EMBED_MODEL", "qwen3-embedding:4b")   # 主力：qwen3-embedding 2560维 40K上下文
 EMBED_DIM = 2560                       # qwen3-embedding:4b 输出维度
-DEFAULT_COLLECTION = "zgptvector_v2"   # 2560维 Qdrant 集合
+DEFAULT_COLLECTION = "athanor_v1"   # 2560维 Qdrant 集合（分面分类单集合方案）
 
 # 引用粒度：表格行数 > 此值时按行拆分为独立引用（--table-split-threshold 可覆盖）
 TABLE_SPLIT_THRESHOLD = 4
@@ -767,16 +767,23 @@ def search_multi(
                 payload = r.get("payload", {})
                 all_raw.append((
                     {
-                        "text": payload.get("text", ""),
-                        "source": payload.get("source", "未知"),
-                        "score": round(r.get("score", 0), 4),
-                        "chunk_index": payload.get("chunk_index", 0),
-                        "doc_id": payload.get("doc_id", ""),
-                        "book": payload.get("book", ""),
-                        "chapter": payload.get("chapter", ""),
-                        "page": payload.get("page", ""),
-                        "images": payload.get("images", []),
-                        "_collection": col,          # 标记来源集合
+                        "text":            payload.get("text", ""),
+                        "title":           payload.get("title", ""),
+                        "source":          payload.get("source", "未知"),
+                        "score":           round(r.get("score", 0), 4),
+                        "chunk_index":     payload.get("chunk_index", 0),
+                        "doc_id":          payload.get("doc_id", ""),
+                        "images":          payload.get("images", []),
+                        # v4.0 分面字段
+                        "content_type":    payload.get("content_type", "knowledge"),
+                        "domain":          payload.get("domain", []),
+                        "lifecycle":       payload.get("lifecycle", ""),
+                        "trust_score":     payload.get("trust_score", 3),
+                        "keywords":        payload.get("keywords", []),
+                        "relations":       payload.get("relations", []),
+                        "timeline":        payload.get("timeline", {}),
+                        "origin":          payload.get("origin", {}),
+                        "_collection":     col,          # 标记来源集合
                     },
                     r.get("score", 0),              # 原始分数（用于归一化）
                     col
@@ -926,10 +933,13 @@ def _text_hash(text: str) -> str:
 
 def _source_to_meta(source: str) -> dict:
     """
-    解析 --source 参数为结构化元数据。
+    解析 --source 参数为结构化元数据（已弃用，保留供外部脚本兼容）。
     支持格式:
       "书名/章节/页码"   → {book, chapter, page}
       "文件名"           → {file_name}
+    
+    注意: v4.0 字段结构已不再使用 book/chapter/page 扁平字段，
+    新代码应直接在 metadata dict 中传入 title/source/origin 等。
     """
     meta = {"file_name": source}
     parts = source.replace("\\", "/").split("/")
@@ -1071,7 +1081,7 @@ def ingest(
             text = f.read()
         source = os.path.basename(file_path)
     elif text:
-        source = metadata.get("file_name", "直接输入") if metadata else "直接输入"
+        source = metadata.get("source", "直接输入") if metadata else "直接输入"
     else:
         return {"ok": False, "error": "请提供 file_path 或 text"}
 
@@ -1133,13 +1143,49 @@ def ingest(
     except Exception:
         next_id = 0
 
-    # ── 构建 Qdrant points（含增强元数据）──
+    # ── 构建 Qdrant points（v4.0 分组字段结构）──
     base_meta = metadata or {}
     doc_id = base_meta.get("doc_id", str(uuid.uuid4())[:8])
     ingested_at = datetime.now(timezone.utc).isoformat()
     full_text_hash = _text_hash(text)
-    # category：用于路线1（单库+标签过滤），默认取集合名
-    category = base_meta.get("category", collection)
+
+    # ── 分面字段 ──
+    content_type   = base_meta.get("content_type", "knowledge")
+    domain         = base_meta.get("domain", [])
+    lifecycle      = base_meta.get("lifecycle", "published")
+    project_source = base_meta.get("project_source", "manual")
+
+    # ── 知识管理字段 ──
+    knowledge_type = base_meta.get("knowledge_type", "")
+    is_personal    = base_meta.get("is_personal", False)
+    trust_score    = base_meta.get("trust_score", 3)
+    tags           = base_meta.get("tags", [])
+    is_canonical   = base_meta.get("is_canonical", True)
+    relations      = base_meta.get("relations", [])
+    keywords       = base_meta.get("keywords", [])
+    auto_summary   = base_meta.get("auto_summary", "")
+
+    # ── 时效性 + 版本 ──
+    title          = base_meta.get("title") or source
+    publish_date   = base_meta.get("publish_date", None)
+    effective_date = base_meta.get("effective_date", None)
+    expiry_date    = base_meta.get("expiry_date", None)
+    version        = base_meta.get("version", "")
+
+    # ── 来源元数据 ──
+    author        = base_meta.get("author", "")
+    source_url    = base_meta.get("source_url", "")
+    file_type     = base_meta.get("file_type", "txt")
+    ingest_method = base_meta.get("ingest_method", "manual")
+
+    # ── 内容创作字段 ──
+    target_platform = base_meta.get("target_platform", "none")
+    related_product = base_meta.get("related_product", "")
+
+    # ── 系统字段 ──
+    language     = base_meta.get("language", "zh")
+    access_level = base_meta.get("access_level", "private")
+    batch_id     = base_meta.get("batch_id", "")
 
     points = []
     for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
@@ -1147,16 +1193,72 @@ def ingest(
             "id": next_id + i,
             "vector": vec,
             "payload": {
+                # ── 内容字段 ──
                 "text": chunk,
+                "title": title,
                 "source": source,
                 "chunk_index": i,
                 "total_chunks": len(chunks),
                 "doc_id": doc_id,
                 "content_hash": full_text_hash,
-                "ingested_at": ingested_at,
                 "images": valid_images,
-                "category": category,
-                **{k: v for k, v in base_meta.items() if k not in ("category", "doc_id")}
+
+                # ── 分面字段 ──
+                "content_type": content_type,
+                "domain": domain if isinstance(domain, list) else [domain],
+                "lifecycle": lifecycle,
+                "project_source": project_source,
+
+                # ── 知识管理 ──
+                "knowledge_type": knowledge_type,
+                "is_personal": is_personal,
+                "trust_score": trust_score,
+                "tags": tags if isinstance(tags, list) else [],
+                "is_canonical": is_canonical,
+                "relations": relations if isinstance(relations, list) else [],
+                "keywords": keywords if isinstance(keywords, list) else [],
+                "auto_summary": auto_summary,
+
+                # ── timeline（所有时间戳聚合）──
+                "timeline": {
+                    "published": publish_date,
+                    "effective": effective_date,
+                    "expiry": expiry_date,
+                    "ingested": ingested_at,
+                    "accessed": None,
+                },
+
+                # ── origin（来源追踪聚合）──
+                "origin": {
+                    "author": author,
+                    "source_url": source_url,
+                    "file_type": file_type,
+                    "ingest_method": ingest_method,
+                },
+
+                # ── stats（使用统计聚合）──
+                "stats": {
+                    "access_count": 0,
+                    "starred": False,
+                },
+
+                # ── 内容创作 ──
+                "target_platform": target_platform,
+                "related_product": related_product,
+                "version": version,
+
+                # ── 系统字段 ──
+                "language": language,
+                "access_level": access_level,
+                "batch_id": batch_id,
+                "is_archived": False,
+
+                # ── 预留扩展字段 ──
+                "ext_text1": None, "ext_text2": None, "ext_text3": None,
+                "ext_text4": None, "ext_text5": None,
+                "ext_num1":  None, "ext_num2":  None, "ext_num3": None,
+                "ext_bool1": None, "ext_bool2": None, "ext_bool3": None,
+                "ext_date1": None, "ext_date2": None, "ext_date3": None,
             }
         })
 
@@ -1180,7 +1282,6 @@ def ingest(
         "content_hash": full_text_hash,
         "embed_model": model,
         "ingested_at": ingested_at,
-        "category": category,
     })
 
     return {
@@ -1200,10 +1301,10 @@ def search(
     collection: str = DEFAULT_COLLECTION,
     score_threshold: float = 0.3,
     model: str = EMBED_MODEL,
-    category_filter: list[str] = None,
+    facet_filter: dict = None,
 ) -> dict:
     """
-    向量搜索知识库。
+    向量搜索知识库（支持分面过滤）。
 
     参数:
         query: 搜索问题
@@ -1211,14 +1312,42 @@ def search(
         collection: 搜索的集合
         score_threshold: 最低相似度
         model: 嵌入模型
-        category_filter: 分类过滤列表（路线1用），只返回 category 在列表中的结果
+        facet_filter: 分面过滤条件，格式：
+            {
+                "content_type": ["knowledge"],           # 内容类型（任一匹配）
+                "domain": ["机械设计", "智能家居"],    # 主题域（任一匹配）
+                "lifecycle": "published",            # 生命周期（单个值）
+                "project_source": ["athanor"],        # 来源项目
+                "is_personal": false,                  # 是否个人化
+                "trust_score_min": 3,                  # 最低可信度
+                "knowledge_type": ["formula"],          # 知识子类型
+                "tags": ["齿轮"],                     # 标签（任一匹配）
+            }
 
     返回结构:
     {
         "ok": true/false,
         "query": "原始查询",
         "total": 匹配数,
-        "chunks": [{"text": "...", "source": "...", "score": 0.95, "category": "..."}, ...]
+        "chunks": [{
+            "text": "...", "title": "...", "source": "...",
+            "score": 0.95, "chunk_index": 0, "doc_id": "...",
+            "images": [...],
+            # 分面字段
+            "content_type": "knowledge", "domain": ["机械设计"],
+            "lifecycle": "published", "project_source": "athanor",
+            # 知识管理
+            "is_personal": false, "trust_score": 4,
+            "knowledge_type": "formula", "tags": ["齿轮"],
+            "is_canonical": true, "relations": [...],
+            "keywords": [...], "auto_summary": "...",
+            # 分组字段
+            "timeline": {"published": ..., "ingested": ..., "accessed": ...},
+            "origin": {"author": "...", "source_url": "...", ...},
+            "stats": {"access_count": 0, "starred": false},
+            # 其他
+            "target_platform": "none", "version": "",
+        }, ...]
     }
     """
     if not _ensure_collection(collection):
@@ -1230,14 +1359,47 @@ def search(
     except Exception as e:
         return {"ok": False, "error": f"嵌入查询失败: {e}"}
 
-    # 构建过滤条件
+    # 构建过滤条件（分面过滤）
     qdrant_filter = None
-    if category_filter:
-        qdrant_filter = {
-            "must": [
-                {"key": "category", "match": {"any": category_filter}}
-            ]
-        }
+    if facet_filter:
+        must_conditions = []
+
+        def _add_match(key, vals):
+            """统一构建 match 条件（单值 or 多值 any）"""
+            must_conditions.append({
+                "key": key,
+                "match": {"value": vals[0]} if len(vals) == 1 else {"any": vals}
+            })
+
+        # 多值匹配字段（content_type / domain / knowledge_type / tags）
+        for key in ("content_type", "domain", "knowledge_type", "tags"):
+            if facet_filter.get(key):
+                _add_match(key, facet_filter[key])
+
+        # 单值匹配字段（lifecycle / project_source）
+        for key in ("lifecycle", "project_source"):
+            if facet_filter.get(key):
+                must_conditions.append({
+                    "key": key,
+                    "match": {"value": facet_filter[key]}
+                })
+
+        # 布尔匹配（is_personal）
+        if "is_personal" in facet_filter:
+            must_conditions.append({
+                "key": "is_personal",
+                "match": {"value": facet_filter["is_personal"]}
+            })
+
+        # 范围匹配（trust_score_min）
+        if facet_filter.get("trust_score_min") is not None:
+            must_conditions.append({
+                "key": "trust_score",
+                "range": {"gte": facet_filter["trust_score_min"]}
+            })
+
+        if must_conditions:
+            qdrant_filter = {"must": must_conditions}
 
     # 搜索 Qdrant
     try:
@@ -1260,21 +1422,45 @@ def search(
     except Exception as e:
         return {"ok": False, "error": f"搜索失败: {e}"}
 
-    # 整理结果
+    # ── 整理结果（v4.0 分组字段）──
     chunks = []
     for r in results:
         payload = r.get("payload", {})
         chunks.append({
-            "text": payload.get("text", ""),
-            "source": payload.get("source", "未知"),
-            "score": round(r.get("score", 0), 4),
-            "chunk_index": payload.get("chunk_index", 0),
-            "doc_id": payload.get("doc_id", ""),
-            "book": payload.get("book", ""),
-            "chapter": payload.get("chapter", ""),
-            "page": payload.get("page", ""),
-            "images": payload.get("images", []),
-            "category": payload.get("category", ""),
+            "text":            payload.get("text", ""),
+            "title":           payload.get("title", ""),
+            "source":          payload.get("source", "未知"),
+            "score":           round(r.get("score", 0), 4),
+            "chunk_index":     payload.get("chunk_index", 0),
+            "doc_id":          payload.get("doc_id", ""),
+            "images":          payload.get("images", []),
+            # 分面字段
+            "content_type":    payload.get("content_type", "knowledge"),
+            "domain":          payload.get("domain", []),
+            "lifecycle":       payload.get("lifecycle", ""),
+            "project_source":  payload.get("project_source", ""),
+            # 知识管理
+            "is_personal":     payload.get("is_personal", False),
+            "trust_score":     payload.get("trust_score", 3),
+            "knowledge_type":  payload.get("knowledge_type", ""),
+            "tags":            payload.get("tags", []),
+            "is_canonical":    payload.get("is_canonical", True),
+            "relations":       payload.get("relations", []),
+            "keywords":        payload.get("keywords", []),
+            "auto_summary":    payload.get("auto_summary", ""),
+            # 分组字段
+            "timeline":        payload.get("timeline", {}),
+            "origin":          payload.get("origin", {}),
+            "stats":           payload.get("stats", {}),
+            # 内容创作
+            "target_platform": payload.get("target_platform", "none"),
+            "related_product": payload.get("related_product", ""),
+            "version":         payload.get("version", ""),
+            # 系统字段
+            "language":        payload.get("language", "zh"),
+            "access_level":    payload.get("access_level", "private"),
+            "batch_id":        payload.get("batch_id", ""),
+            "is_archived":     payload.get("is_archived", False),
         })
 
     return {
@@ -1317,6 +1503,168 @@ def _call_llm_api(messages: list, base_url: str = None, api_key: str = None, mod
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
+
+
+def auto_classify(text: str) -> dict:
+    """
+    使用 LLM 自动分析文本，推断分面字段。
+    返回结构化的分类建议 dict，可直接传给 ingest() 的 metadata 参数。
+
+    设计原则:
+      - LLM 严格从给定选项中选取，禁止自由发挥
+      - 输出经过字段合法性校验，非法值 fallback 到默认值
+      - 文本过长时取前 5000 字符作为样本（分类不需要全文）
+
+    返回:
+      {
+        "ok": true/false,
+        "classification": {content_type, domain[], lifecycle, trust_score,
+                           keywords[], title, author, knowledge_type},
+        "raw_response": "LLM原始输出(调试用)"
+      }
+    """
+    from config.classifications import (
+        CONTENT_TYPES, DOMAINS, LIFECYCLE_STAGES, KNOWLEDGE_TYPES,
+        CONTENT_TYPE_OPTIONS, DOMAIN_OPTIONS, LIFECYCLE_OPTIONS,
+        KNOWLEDGE_TYPE_OPTIONS, TRUST_SCORE_LABELS
+    )
+
+    if not LLM_API_KEY:
+        return {"ok": False, "error": "未配置 LLM API Key，无法自动分类。请在引擎配置页面设置。"}
+
+    # ── 截取样本（分类不需要全文）──
+    sample = text[:5000].strip()
+    if not sample:
+        return {"ok": False, "error": "文本内容为空"}
+
+    # ── 构建所有选项的可读列表（供 LLM 选择）──
+    ct_list = "\n".join(f"  - {k}: {v}" for k, v in CONTENT_TYPES.items())
+    domain_list = "\n".join(f"  - {k}: {v}" for k, v in DOMAINS.items())
+    lifecycle_list = "\n".join(f"  - {k}: {v}" for k, v in LIFECYCLE_STAGES.items())
+    ktype_list = "\n".join(f"  - {k}: {v}" for k, v in KNOWLEDGE_TYPES.items())
+    trust_labels = "\n".join(f"  {k}: {v}" for k, v in TRUST_SCORE_LABELS.items())
+
+    prompt = f"""你是一个知识分类专家。请分析以下文本内容，从给定选项中选择最合适的分类标签。你必须严格从选项中选择，不得自由发挥。
+
+## 文本内容
+{sample}
+
+## 分类选项
+
+### content_type（内容类型）— 必须单选，从以下选项中选择：
+{ct_list}
+
+### domain（主题域）— 可多选 0-3 个，不相关就空数组 []：
+{domain_list}
+
+### lifecycle（生命周期）— 单选：
+{lifecycle_list}
+
+### trust_score（可信度）— 1-5 整数，评分依据：
+{trust_labels}
+
+### knowledge_type（知识子类型，仅 content_type=knowledge 时填，否则留空 ""）— 单选：
+{ktype_list}
+
+### keywords（关键词）— 3-8 个技术术语或关键概念，从文本内容中提取
+
+### title（标题）— 从文本推断的简要标题，不超过 50 字。如果文本有明确标题则使用它
+
+### author（作者）— 如果有明确出处/作者/标准号则提取，否则留空 ""
+
+## 输出格式
+严格输出以下 JSON，不要包含任何额外文字、不要用 ```json 包裹、不要加注释：
+{{"content_type":"standard","domain":["机械设计"],"lifecycle":"published","trust_score":4,"knowledge_type":"","keywords":["齿轮","模数","强度"],"title":"渐开线圆柱齿轮 模数系列","author":"GB/T 1357-2008"}}"""
+
+    try:
+        raw = _call_llm_api(
+            [{"role": "user", "content": prompt}],
+            base_url=LLM_BASE_URL,
+            api_key=LLM_API_KEY,
+            model=LLM_MODEL,
+        )
+    except Exception as e:
+        return {"ok": False, "error": f"LLM 调用失败: {e}"}
+
+    # ── 解析 JSON ──
+    try:
+        # 兼容 LLM 可能输出的 ```json 包裹或前后多余文字
+        raw_clean = raw.strip()
+        if raw_clean.startswith("```"):
+            # 去掉 ```json 和结尾 ```
+            lines = raw_clean.split("\n")
+            # 去掉第一行 ``` 和最后一行 ```
+            json_lines = [l for l in lines if not l.strip().startswith("```")]
+            raw_clean = "\n".join(json_lines)
+        result = json.loads(raw_clean)
+    except json.JSONDecodeError:
+        # 尝试用正则提取 JSON 对象
+        import re
+        m = re.search(r'\{[^{}]*\}', raw, re.DOTALL)
+        if m:
+            try:
+                result = json.loads(m.group(0))
+            except json.JSONDecodeError:
+                return {"ok": False, "error": "LLM 返回格式无法解析", "raw_response": raw}
+        else:
+            return {"ok": False, "error": "LLM 返回格式无法解析", "raw_response": raw}
+
+    # ── 字段合法性校验 ──
+    valid_ct = set(CONTENT_TYPES.keys())
+    valid_domain = set(DOMAINS.keys())
+    valid_lifecycle = set(LIFECYCLE_STAGES.keys())
+    valid_ktype = set(KNOWLEDGE_TYPES.keys())
+
+    classification = {
+        "content_type": result.get("content_type", "knowledge"),
+        "domain": result.get("domain", []),
+        "lifecycle": result.get("lifecycle", "published"),
+        "trust_score": result.get("trust_score", 3),
+        "knowledge_type": result.get("knowledge_type", ""),
+        "keywords": result.get("keywords", []),
+        "title": result.get("title", ""),
+        "author": result.get("author", ""),
+    }
+
+    # 校验 content_type（非法值用默认）
+    if classification["content_type"] not in valid_ct:
+        classification["content_type"] = "knowledge"
+
+    # 校验 domain（过滤非法值）
+    if isinstance(classification["domain"], list):
+        classification["domain"] = [d for d in classification["domain"] if d in valid_domain]
+    else:
+        classification["domain"] = []
+
+    # 校验 lifecycle
+    if classification["lifecycle"] not in valid_lifecycle:
+        classification["lifecycle"] = "published"
+
+    # 校验 trust_score（范围 1-5）
+    try:
+        ts = int(classification["trust_score"])
+        classification["trust_score"] = max(1, min(5, ts))
+    except (ValueError, TypeError):
+        classification["trust_score"] = 3
+
+    # 校验 knowledge_type
+    if classification["knowledge_type"] not in valid_ktype:
+        classification["knowledge_type"] = ""
+
+    # 校验 keywords（确保是 list of str）
+    if not isinstance(classification["keywords"], list):
+        classification["keywords"] = []
+    classification["keywords"] = [str(k).strip()[:50] for k in classification["keywords"] if k]
+
+    # 校验 title/author（确保是 str）
+    classification["title"] = str(classification["title"]).strip()[:100]
+    classification["author"] = str(classification["author"]).strip()[:100]
+
+    return {
+        "ok": True,
+        "classification": classification,
+        "raw_response": raw,
+    }
 
 
 def _renumber_citations(synthesis: str, citation_keys: list) -> tuple[str, list[int]]:
@@ -1929,21 +2277,13 @@ def answer(
     llm_api_key: str = None,
     output_dir: str = None,
     table_split_threshold: int = None,
-    search_mode: str = "auto",
-    category_filter: list[str] = None,
-    search_collections: list[str] = None,
+    facet_filter: dict = None,
 ) -> dict:
     """
-    端到端知识库问答：搜索 → LLM API 合成 → HTML 报告（MathJax 公式渲染）。
+    端到端知识库问答：搜索 → LLM API 合成 → HTML 报告（KaTeX 公式渲染）。
 
     参数:
-        search_mode:
-            "single"  — 单库搜索（路线1）
-            "multi"   — 跨库合并搜索（路线2）
-            "auto"    — 自动：如果 collection 是单库分类法（22大类/DDC/单库）用 single，
-                          如果是细分类（T类二级）用 multi
-        category_filter: 路线1 用，只返回指定 category 的结果
-        search_collections: 路线2 用，要搜索的集合列表（None=全部）
+        facet_filter: 分面过滤条件（见 search() 函数说明）
     """
     output_dir = output_dir or OUTPUT_DIR
     llm_model = llm_model or LLM_MODEL
@@ -1956,28 +2296,11 @@ def answer(
             "error": "未配置 LLM API。请设置环境变量 KB_LLM_BASE_URL/KB_LLM_API_KEY 或传入 --llm-base-url/--llm-api-key。"
         }
 
-    # 自动判断搜索模式
-    if search_mode == "auto":
-        # 粗分类的集合名通常是 1-3 个字符（A, B, T, TH, DDC_000...）
-        # 细分类的集合名通常是 2-7 个字符且不含下划线（TH, TP, TN...）
-        # 简单启发：如果当前集合名长度 <= 3 或包含下划线，可能是粗分类 → single
-        if len(collection) <= 3 or "_" in collection:
-            search_mode = "single"
-        else:
-            search_mode = "multi"
-
-    # 1. 搜索
-    if search_mode == "multi":
-        sr = search_multi(
-            query, collections=search_collections, top_k=top_k,
-            score_threshold=threshold, model=model
-        )
-        raw_chunks = sr.get("chunks", [])
-    else:
-        sr = search(query, top_k=top_k, collection=collection,
-                     score_threshold=threshold, model=model,
-                     category_filter=category_filter)
-        raw_chunks = sr.get("chunks", [])
+    # 1. 搜索（单集合方案）
+    sr = search(query, top_k=top_k, collection=collection,
+                 score_threshold=threshold, model=model,
+                 facet_filter=facet_filter)
+    raw_chunks = sr.get("chunks", [])
 
     if not sr.get("ok"):
         return {"ok": False, "error": sr.get("error", "搜索失败")}
@@ -2010,6 +2333,365 @@ def answer(
         return {"ok": False, "error": f"HTML 报告生成失败: {e}", "synthesis": synthesis, "chunks": chunks}
 
     return {"ok": True, "query": query, "synthesis": synthesis, "html": html_path, "chunks": expanded_chunks}
+
+
+# ═══════════════════════════════════════════
+# 知识管理函数 (v4.0)
+# ═══════════════════════════════════════════
+
+def get_facet_stats(collection: str = DEFAULT_COLLECTION) -> dict:
+    """
+    获取知识库的分面维度统计。
+
+    返回:
+        {
+            "ok": true,
+            "total_points": N,
+            "facets": {
+                "content_type": {"knowledge": 120, "standard": 15, ...},
+                "domain":        {"机械设计": 45, "AI编程": 30, ...},
+                "lifecycle":     {"published": 80, "draft": 12, ...},
+                "project_source":{"manual": 50, "athanor": 30, ...},
+            },
+            "meta": {
+                "avg_trust": 3.2,
+                "personal_count": 5,
+                "archived_count": 0,
+            }
+        }
+    """
+    if not _check_qdrant():
+        return {"ok": False, "error": "Qdrant 未运行"}
+
+    try:
+        # 获取 points_count
+        info = requests.get(f"{QDRANT_URL}/collections/{collection}", timeout=5)
+        if info.status_code != 200:
+            return {"ok": False, "error": f"集合 {collection} 不存在"}
+
+        total_pts = info.json()["result"]["points_count"]
+        if total_pts == 0:
+            return {"ok": True, "total_points": 0, "facets": {}, "meta": {}}
+
+        facets = {}
+        meta_stats = {}
+
+        # ── 分面分布统计 ──
+        # 分页 scroll 收集所有 points（避免超大集合单次请求过载）
+        scroll_limit = 1000
+        offset = 0
+        all_points = []
+        while offset < total_pts:
+            try:
+                resp = requests.post(
+                    f"{QDRANT_URL}/collections/{collection}/points/scroll",
+                    json={"limit": scroll_limit, "offset": offset,
+                          "with_payload": True, "with_vector": False},
+                    timeout=30
+                )
+                batch = resp.json()["result"]["points"] if resp.status_code == 200 else []
+                if not batch:
+                    break
+                all_points.extend(batch)
+                offset += len(batch)
+            except Exception:
+                break
+
+        # 聚合计数
+        ct_count = defaultdict(int)
+        domain_count = defaultdict(int)
+        lc_count = defaultdict(int)
+        ps_count = defaultdict(int)
+        trust_sum = 0
+        trust_n = 0
+        personal_n = 0
+        archived_n = 0
+
+        for p in all_points:
+            pl = p.get("payload", {})
+            ct = pl.get("content_type", "unknown")
+            ct_count[ct] += 1
+
+            for d in pl.get("domain", []):
+                domain_count[d] += 1
+
+            lc = pl.get("lifecycle", "")
+            if lc:
+                lc_count[lc] += 1
+
+            ps = pl.get("project_source", "")
+            if ps:
+                ps_count[ps] += 1
+
+            ts = pl.get("trust_score")
+            if ts is not None:
+                trust_sum += ts
+                trust_n += 1
+
+            if pl.get("is_personal", False):
+                personal_n += 1
+
+            if pl.get("is_archived", False):
+                archived_n += 1
+
+        facets["content_type"] = dict(ct_count)
+        facets["domain"] = dict(domain_count)
+        facets["lifecycle"] = dict(lc_count)
+        facets["project_source"] = dict(ps_count)
+
+        meta_stats["avg_trust"] = round(trust_sum / trust_n, 1) if trust_n > 0 else 0
+        meta_stats["personal_count"] = personal_n
+        meta_stats["archived_count"] = archived_n
+
+        return {
+            "ok": True,
+            "total_points": total_pts,
+            "facets": facets,
+            "meta": meta_stats,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def update_metadata(
+    doc_id: str,
+    updates: dict,
+    collection: str = DEFAULT_COLLECTION,
+) -> dict:
+    """
+    更新指定文档所有 chunk 的 Payload 字段。
+
+    参数:
+        doc_id: 文档 ID
+        updates: 要更新的字段 dict，如 {"trust_score": 5, "is_archived": true}
+        collection: 集合名
+
+    返回:
+        {"ok": true, "updated": N, "doc_id": "..."}
+    """
+    if not _check_qdrant():
+        return {"ok": False, "error": "Qdrant 未运行"}
+
+    try:
+        # 1. 找出该 doc_id 的所有 point
+        resp = requests.post(
+            f"{QDRANT_URL}/collections/{collection}/points/scroll",
+            json={
+                "filter": {
+                    "must": [{"key": "doc_id", "match": {"value": doc_id}}]
+                },
+                "limit": 1000,
+                "with_payload": True,
+                "with_vector": False,
+            },
+            timeout=20
+        )
+        if resp.status_code != 200:
+            return {"ok": False, "error": f"搜索失败: {resp.status_code}"}
+
+        points = resp.json()["result"]["points"]
+        if not points:
+            return {"ok": False, "error": f"未找到 doc_id={doc_id} 的记录"}
+
+        # 2. 用 set_payload API 批量更新（key-level merge，不会覆盖其他字段）
+        all_point_ids = [p["id"] for p in points]
+
+        put_resp = requests.post(
+            f"{QDRANT_URL}/collections/{collection}/points/payload",
+            json={"payload": updates, "points": all_point_ids},
+            timeout=10
+        )
+        if put_resp.status_code != 200:
+            return {"ok": False, "error": f"更新失败: {put_resp.status_code}"}
+
+        return {"ok": True, "updated": len(points), "doc_id": doc_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def set_doc_relations(
+    doc_id: str,
+    add_relations: list = None,
+    remove_relations: list = None,
+    collection: str = DEFAULT_COLLECTION,
+) -> dict:
+    """
+    管理文档的关系字段。
+
+    参数:
+        doc_id: 文档 ID
+        add_relations: 要添加的关系列表 [{"type": "similar", "doc_id": "xxx"}, ...]
+        remove_relations: 要移除的关系列表（按 {"type": "x", "doc_id": "y"} 匹配）
+        collection: 集合名
+
+    返回:
+        {"ok": true, "updated": N, "doc_id": "..."}
+    """
+    add_relations = add_relations or []
+    remove_relations = remove_relations or []
+
+    if not add_relations and not remove_relations:
+        return {"ok": False, "error": "请提供 add_relations 或 remove_relations"}
+
+    if not _check_qdrant():
+        return {"ok": False, "error": "Qdrant 未运行"}
+
+    try:
+        # 获取当前所有 chunk 的当前 relations
+        resp = requests.post(
+            f"{QDRANT_URL}/collections/{collection}/points/scroll",
+            json={
+                "filter": {
+                    "must": [{"key": "doc_id", "match": {"value": doc_id}}]
+                },
+                "limit": 1000,
+                "with_payload": True,
+                "with_vector": False,
+            },
+            timeout=20
+        )
+        if resp.status_code != 200:
+            return {"ok": False, "error": f"搜索失败: {resp.status_code}"}
+
+        points = resp.json()["result"]["points"]
+        if not points:
+            return {"ok": False, "error": f"未找到 doc_id={doc_id} 的记录"}
+
+        # 取第一个 chunk 的 relations 作为基准，做合并
+        base_relations = list(points[0].get("payload", {}).get("relations", []))
+        for ar in add_relations:
+            if ar not in base_relations:
+                base_relations.append(ar)
+        for rr in remove_relations:
+            if rr in base_relations:
+                base_relations.remove(rr)
+
+        # 用 set_payload API 批量更新所有该 doc 的 chunk
+        all_ids = [p["id"] for p in points]
+        put_resp = requests.post(
+            f"{QDRANT_URL}/collections/{collection}/points/payload",
+            json={"payload": {"relations": base_relations}, "points": all_ids},
+            timeout=10
+        )
+        if put_resp.status_code != 200:
+            return {"ok": False, "error": f"更新失败: {put_resp.status_code}"}
+
+        return {"ok": True, "updated": len(points), "doc_id": doc_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def search_by_doc_id(
+    doc_id: str,
+    collection: str = DEFAULT_COLLECTION,
+) -> dict:
+    """
+    按 doc_id 查找所有 chunk。
+
+    返回:
+        {"ok": true, "doc_id": "...", "chunks": [{...}, ...]}
+    """
+    if not _check_qdrant():
+        return {"ok": False, "error": "Qdrant 未运行"}
+
+    try:
+        resp = requests.post(
+            f"{QDRANT_URL}/collections/{collection}/points/scroll",
+            json={
+                "filter": {
+                    "must": [{"key": "doc_id", "match": {"value": doc_id}}]
+                },
+                "limit": 1000,
+                "with_payload": True,
+                "with_vector": False,
+            },
+            timeout=20
+        )
+        if resp.status_code != 200:
+            return {"ok": False, "error": f"搜索失败: {resp.status_code}"}
+
+        points = resp.json()["result"]["points"]
+        chunks = []
+        for p in points:
+            payload = p.get("payload", {})
+            chunks.append({
+                "text":            payload.get("text", ""),
+                "title":           payload.get("title", ""),
+                "source":          payload.get("source", "未知"),
+                "chunk_index":     payload.get("chunk_index", 0),
+                "content_type":    payload.get("content_type", ""),
+                "domain":          payload.get("domain", []),
+                "lifecycle":       payload.get("lifecycle", ""),
+                "project_source":  payload.get("project_source", ""),
+                "trust_score":     payload.get("trust_score", 3),
+                "is_canonical":    payload.get("is_canonical", True),
+                "is_archived":     payload.get("is_archived", False),
+                "relations":       payload.get("relations", []),
+                "keywords":        payload.get("keywords", []),
+                "auto_summary":    payload.get("auto_summary", ""),
+                "timeline":        payload.get("timeline", {}),
+                "origin":          payload.get("origin", {}),
+                "stats":           payload.get("stats", {}),
+            })
+
+        return {"ok": True, "doc_id": doc_id, "total": len(chunks), "chunks": chunks}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def get_doc_ids(
+    collection: str = DEFAULT_COLLECTION,
+    limit: int = 200,
+) -> dict:
+    """
+    获取集合中的去重 doc_id 列表（用于知识中枢管理）。
+
+    返回:
+        {"ok": true, "doc_ids": ["xxx", "yyy", ...]}
+    """
+    if not _check_qdrant():
+        return {"ok": False, "error": "Qdrant 未运行"}
+
+    try:
+        # 先获取总数
+        info = requests.get(f"{QDRANT_URL}/collections/{collection}", timeout=5)
+        total_pts = info.json()["result"]["points_count"] if info.status_code == 200 else 0
+
+        if total_pts == 0:
+            return {"ok": True, "doc_ids": []}
+
+        # 分页 scroll：每批 1000，取足去重 doc 或遍历完所有 points
+        scroll_limit = 1000
+        offset = 0
+        seen = set()
+        doc_ids = []
+        while True:
+            resp = requests.post(
+                f"{QDRANT_URL}/collections/{collection}/points/scroll",
+                json={"limit": scroll_limit, "offset": offset,
+                      "with_payload": True, "with_vector": False},
+                timeout=30
+            )
+            batch = resp.json()["result"]["points"] if resp.status_code == 200 else []
+            if not batch:
+                break
+
+            for p in batch:
+                did = p.get("payload", {}).get("doc_id", "")
+                if did and did not in seen:
+                    seen.add(did)
+                    doc_ids.append(did)
+                    if len(doc_ids) >= limit:
+                        break
+            offset += len(batch)
+            if len(doc_ids) >= limit:
+                break
+            if len(doc_ids) >= limit:
+                break
+
+        return {"ok": True, "doc_ids": doc_ids, "total_unique": len(doc_ids)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 # ═══════════════════════════════════════════
