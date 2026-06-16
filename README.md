@@ -58,25 +58,6 @@
 
 ---
 
-## ⚡ 3 秒快速体验
-
-```bash
-# 1. 克隆项目
-git clone https://github.com/shiyao222333-afk/athanor.git && cd athanor
-
-# 2. 安装依赖
-pip install -r requirements.txt
-
-# 3. 启动
-python run.py
-# → 浏览器访问 http://localhost:8080
-# → 跟着向导建库 → 上传文件 → 开始提问！
-```
-
-> 💡 需要有 LLM API Key（DeepSeek / 通义千问 等均可），在「引擎配置」页面一键填写。入门指南见 [START.md](START.md)。
-
----
-
 ## ✨ 核心能力 & 竞品对比
 
 > 下表中每个 Athanor ✅ 后面标注了与竞品的关键差异。完整学术/技术依据详见 [docs/schema.md](docs/schema.md) · [PROJECT_PLAN.md](PROJECT_PLAN.md) · [CHANGELOG.md](CHANGELOG.md).
@@ -379,20 +360,6 @@ The answer in one line:
 | No memory | ❌ Each chat starts fresh | ✅ Gets smarter over time |
 | No traceability | ❌ Can't tell where answers come from | ✅ Every answer cites `[refN]` |
 | Data privacy | ❌ Uploaded to cloud | ✅ Fully local |
-
----
-
-## ⚡ Quick Start
-
-```bash
-git clone https://github.com/shiyao222333-afk/athanor.git && cd athanor
-pip install -r requirements.txt
-python run.py
-# → Open http://localhost:8080
-# → Follow the wizard to create a collection → Upload files → Ask questions!
-```
-
-> 💡 Requires an LLM API Key (DeepSeek, Qwen, etc.). Configure in the Engine Settings page. See [START.md](START.md) for details.
 
 ---
 
