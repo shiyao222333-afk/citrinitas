@@ -924,6 +924,7 @@ def get_embed_models() -> list[str]:
         return []
 
 
+# TODO: 函数 has_any_data 已废弃（无人调用），将在 v0.5.0 删除
 def has_any_data() -> bool:
     """
     检查任意 Qdrant 集合中是否有数据（用于判断是否锁定分类法/嵌入模型选择）。
@@ -967,6 +968,7 @@ def _log_ingest(entry: dict):
         pass  # 日志写入失败不影响主流程
 
 
+# TODO: 函数 read_ingest_log 已废弃（无人调用），将在 v0.5.0 删除
 def read_ingest_log() -> list[dict]:
     """
     读取摄入日志，返回所有记录列表。
@@ -990,6 +992,7 @@ def read_ingest_log() -> list[dict]:
         return []
 
 
+# TODO: 函数 search_multi 已废弃（无人调用），将在 v0.5.0 删除
 def search_multi(
     query: str,
     collections: list[str] = None,
@@ -1133,6 +1136,7 @@ def search_multi(
     }
 
 
+# TODO: 函数 rebuild_from_log 已废弃（无人调用），将在 v0.5.0 删除
 def rebuild_from_log(
     target_collections: list[str] = None,
     progress_callback=None,
@@ -2931,6 +2935,7 @@ def get_facet_stats(collection: str = DEFAULT_COLLECTION) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+# TODO: 函数 update_metadata 已废弃（无人调用），将在 v0.5.0 删除
 def update_metadata(
     doc_id: str,
     updates: dict,
@@ -2987,6 +2992,7 @@ def update_metadata(
         return {"ok": False, "error": str(e)}
 
 
+# TODO: 函数 set_doc_relations 已废弃（无人调用），将在 v0.5.0 删除
 def set_doc_relations(
     doc_id: str,
     add_relations: list = None,
@@ -3184,10 +3190,14 @@ def get_doc_ids(
 
 def list_documents(collection: str = DEFAULT_COLLECTION,
                   page: int = 1,
-                  page_size: int = 20) -> dict:
+                  page_size: int = 20,
+                  needs_review: bool = None) -> dict:
     """
     列出知识库中的去重文档（分页）。
     按 doc_uid 去重，每个文档取 chunk_index=0 的元数据作为代表。
+
+    参数：
+        needs_review: 如果为 True/False，只返回对应标记的文档；如果为 None，返回所有文档
 
     返回：
         {
@@ -3225,11 +3235,28 @@ def list_documents(collection: str = DEFAULT_COLLECTION,
         seen = {}
         # seen[doc_uid] = {metadata from first chunk}
 
+        # 构建 filter（如果 needs_review 不是 None）
+        scroll_filter = None
+        if needs_review is not None:
+            scroll_filter = {
+                "must": [
+                    {"key": "needs_review", "match": {"value": bool(needs_review)}}
+                ]
+            }
+
         while True:
+            scroll_body = {
+                "limit": scroll_limit,
+                "offset": offset,
+                "with_payload": True,
+                "with_vector": False,
+            }
+            if scroll_filter:
+                scroll_body["filter"] = scroll_filter
+
             resp = requests.post(
                 f"{QDRANT_URL}/collections/{collection}/points/scroll",
-                json={"limit": scroll_limit, "offset": offset,
-                      "with_payload": True, "with_vector": False},
+                json=scroll_body,
                 timeout=30,
             )
             batch = resp.json()["result"]["points"] if resp.status_code == 200 else []

@@ -64,7 +64,7 @@
 - [x] 1c. PDF 双路径 — pypdf 文字层 → 不足时标记 ocr_recommended
 - [x] 1d. 编码自动检测（chardet）— UTF-8 → GBK → latin-1 兜底链
 - [x] 1e. 新格式 — .docx, .pptx, .srt, .html（全部有提取函数）
-- [x] 1f. 元数据来源标记 — `metadata_source: "file" | "ocr" | "manual"`（每个摄入路径标记）
+- [ ] 1f. 元数据来源标记 — `metadata_source` 字段已废弃（v0.4.5 从代码中删除）
 - [x] 1g. 文件大小上限 50MB（UI 限制 + 检测时警告）
 - [x] 1h. 页面 UI 调整 — 动态格式列表 + 格式识别实时预览
 - [x] 1i. 无文件场景 source_path 处理（手动/OCR 标记为空）
