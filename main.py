@@ -48,6 +48,30 @@ if os.path.exists(ENV_FILE):
                 key, _, value = line.partition("=")
                 os.environ[key.strip()] = value.strip().strip('"').strip("'")
 
+
+# ═══════════════════════════════════════════
+# 辅助函数
+# ═══════════════════════════════════════════
+
+def render_chunk_card(c: dict, idx: int):
+    """渲染搜索结果卡片（U4 修复 - 显示新字段）"""
+    with ui.card().classes("w-full"):
+        title = c.get("title") or c.get("source", "未知")
+        ui.markdown(f"**{idx}.** {title}")
+        
+        # 显示新字段（U4 修复）
+        with ui.row().classes("items-center gap-2 wrap"):
+            if c.get("needs_review"):
+                ui.badge("⚠️ 待审核", color="orange").classes("text-xs")
+            ui.label(f"📄 {c.get('content_type', 'N/A')}").classes("text-xs text-gray-400")
+            ui.label(f"🏷️ {', '.join(c.get('domain', []))}").classes("text-xs text-gray-400")
+            ui.label(f"✅ {c.get('epistemic_status', 'N/A')}").classes("text-xs text-gray-400")
+            ui.label(f"⏱️ {c.get('temporal_nature', 'N/A')}").classes("text-xs text-gray-500")
+        
+        ui.markdown(f"```\n{c.get('text', '')[:300]}\n```")
+        ui.label(f"分数: {c.get('score', 0):.2f}").classes("text-xs text-gray-500")
+
+
 if os.environ.get("KB_EMBED_MODEL"):
     kb_query.EMBED_MODEL = os.environ["KB_EMBED_MODEL"]
 
@@ -854,11 +878,7 @@ def page_search():
                                 ui.separator()
                                 ui.markdown("### 📚 来源引用")
                                 for i, c in enumerate(chunks):
-                                    with ui.card().classes("w-full"):
-                                        title = c.get("title") or c.get("source", "未知")
-                                        ui.markdown(f"**{i+1}.** {title}")
-                                        ui.markdown(f"```\n{c.get('text', '')[:300]}\n```")
-                                        ui.label(f"分数: {c.get('score', 0):.2f}").classes("text-xs text-gray-500")
+                                    render_chunk_card(c, i+1)
                         else:
                             # LLM 不可用，回退显示搜索结果
                             error_msg = result.get("error", "")
@@ -871,11 +891,7 @@ def page_search():
                             ui.markdown("### 🔍 搜索结果（AI 未启用）")
                             sr = search_result
                             for i, c in enumerate(sr.get("chunks", [])):
-                                with ui.card().classes("w-full"):
-                                    title = c.get("title") or c.get("source", "未知")
-                                    ui.markdown(f"**{i+1}.** {title}")
-                                    ui.markdown(f"```\n{c.get('text', '')[:300]}\n```")
-                                    ui.label(f"分数: {c.get('score', 0):.2f}").classes("text-xs text-gray-500")
+                                render_chunk_card(c, i+1)
 
                     STATE["last_answer"] = result
                 else:
@@ -894,11 +910,7 @@ def page_search():
                         results_area.clear()
                         ui.markdown("### 🔍 搜索结果")
                         for i, c in enumerate(result.get("chunks", [])):
-                            with ui.card().classes("w-full"):
-                                title = c.get("title") or c.get("source", "未知")
-                                ui.markdown(f"**{i+1}.** {title}")
-                                ui.markdown(f"```\n{c.get('text', '')[:300]}\n```")
-                                ui.label(f"分数: {c.get('score', 0):.2f}").classes("text-xs text-gray-500")
+                            render_chunk_card(c, i+1)
                     STATE["last_search"] = result
 
                 refresh_system_state()

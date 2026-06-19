@@ -11,10 +11,11 @@
 ## [Unreleased]
 
 ### Fixed
-- 🔧 P1 问题修复（F5/C11/F7）：
+- 🔧 P1 问题修复（F5/C11/F7/U4）：
   - F5: 文档管理页面添加审核状态过滤器（后端 list_documents() 支持 needs_review 参数 + 前端过滤器 UI）
   - C11: PROJECT_PLAN.md 更正 1f 标记（metadata_source 已废弃）
   - F7: kb_query.py 标记 6 个未使用函数为废弃（将在 v0.5.0 删除）
+  - U4: 搜索结果卡片现显示新字段（content_type, domain, epistemic_status, temporal_nature, needs_review）
 
 ---
 
