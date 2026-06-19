@@ -772,7 +772,7 @@ def page_ingest():
                     if lc_val in lc_options:
                         lifecycle.set_value(lc_val)
                     ts = cls.get("trust_score", 3)
-                    trust_score.set_value(int(ts) if ts else 3)
+                    trust_score.set_value(max(0, min(5, int(ts) if ts else 3)))
                     kw = cls.get("keywords", [])
                     if kw:
                         keywords.set_value(", ".join(kw if isinstance(kw, list) else [str(kw)]))

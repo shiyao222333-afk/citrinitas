@@ -11,42 +11,53 @@
 ## [Unreleased]
 
 ### Fixed
-- 🔧 P1 问题修复（F5/C11/F7/U4）：
-  - F5: 文档管理页面添加审核状态过滤器（后端 list_documents() 支持 needs_review 参数 + 前端过滤器 UI）
-  - C11: PROJECT_PLAN.md 更正 1f 标记（metadata_source 已废弃）
-  - F7: kb_query.py 标记 6 个未使用函数为废弃（将在 v0.5.0 删除）
-  - U4: 搜索结果卡片现显示新字段（content_type, domain, epistemic_status, temporal_nature, needs_review）
+- 🔧 P1 问题修复（D1/U7/S1）：
+  - D1+U7: `trust_score` 统一为 0-5 刻度（0=未评级），`TRUST_SCORE_LABELS` 加入 `0` 键，`auto_classify` prompt 修正，结果加 clamp 防御
+  - S1: Payload Index 补充 `needs_review` 字段（`_ensure_collection()` + `create_collection()`）
 
 ---
 
-## [v0.4.6] - 2026-06-19
-  - F5: 文档管理页面添加审核状态过滤器（后端 list_documents() 支持 needs_review 参数）
-  - C11: PROJECT_PLAN.md 更正 1f 标记（metadata_source 已废弃）
-  - F7: kb_query.py 标记 6 个未使用函数为废弃（将在 v0.5.0 删除）
+## [v0.4.9] - 2026-06-20
+
+### Fixed
+- D1+U7: `trust_score` 统一为 0-5 刻度（0=未评级）
+- `TRUST_SCORE_LABELS` 加入 `0: 未评级` 键
+- `auto_classify` prompt 修正为 0-5
+- `auto_classify` 结果加 `max(0, min(5, ...))` clamp
+- `main.py` `trust_score.set_value()` 加 clamp
+- `schema.md` 更新为 0-5（两处）
+
+---
+
+## [v0.4.8] - 2026-06-19
+
+### Fixed
+- U4: 搜索结果卡片现显示新字段（content_type, domain, epistemic_status, temporal_nature, needs_review）
+- F4: `search_by_doc_id()` 返回 `needs_review` 字段
+- 新增 `render_chunk_card()` 辅助函数，三处搜索结果展示统一调用
+
+---
+
+## [v0.4.7] - 2026-06-19
+
+### Fixed
+- F5: `list_documents()` 支持 `needs_review` 过滤参数（后端）+ 文档管理页面添加审核状态过滤器（前端 UI）
+- C11: `PROJECT_PLAN.md` 更正 1f 标记（`metadata_source` 已废弃）
+- F7: `kb_query.py` 标记 6 个未使用函数为废弃（将在 v0.5.0 删除）
 
 ---
 
 ## [v0.4.6] - 2026-06-19
 
 ### Fixed
-- 🔧 P1 问题修复（U2, U3）：
-  - U2: 文件元数据现通过 AI 分析确认卡片展示
-  - U3: AI 分析结果现通过确认卡片展示，用户可在摄入前查看/修改
-  - 新增"AI 分析"确认卡片（阶段二），展示文件元数据 + AI 推断结果
+- U2+U3: 阶段2 AI 分析后显示确认卡片，用户可审核元数据再摄入
+- 新增 AI 分析确认卡片（阶段二），展示文件元数据 + AI 推断结果
 
 ---
 
-## [v0.4.6] - 2026-06-19
+## [v0.4.5] - 2026-06-18
 
 ### Fixed
-- 🔧 P1 问题修复（U2, U3）：
-  - U2: 文件元数据现通过 AI 分析确认卡片展示，用户可查看并确认文件自带元数据
-  - U3: AI 分析结果现通过确认卡片展示，用户可在摄入前查看、修改、确认元数据
-  - 新增"AI 分析"确认卡片（阶段二），展示文件元数据 + AI 推断结果，用户确认后再摄入
-
----
-
-### Fixed — 2026-06-19
 - 🔧 P1 问题修复（17项）：
   - F1: `metadata.update()` 全量合并 AI 分类结果（替代选择性合并）
   - F2: 添加 `_safe_slice_point()` 函数（中文字符切片保护）
@@ -61,7 +72,7 @@
   - D1: `trust_score` 统一为 0-5 整数（UI + 后端）
   - E4: `source_path` 存储原始文件名（已正确）
 
-### Changed — 2026-06-19
+### Changed
 - 🔄 项目命名重构：Athanor → Citrinitas（代码内部全量改名）
   - main.py / run.py / run.bat：标题 / 打印 / 窗口名更新
   - config / utils / classifications：注释更新
@@ -70,10 +81,10 @@
   - venv 重建为 `D:\citrinitas\venv`
   - Qdrant 集合名 `athanor_v1` 保留不变（避免数据迁移）
 
-### Fixed — 2026-06-19
+### Fixed
 - 🐛 启动崩溃：Qdrant 离线时 `_r` 未定义 NameError
 
-### Added — 2026-06-19
+### Added
 - ✨ 新增 BLUEPRINT.md（项目宪法）
 - ✨ 新增 FLOWCHART.md（数据流程图 + 节点定义）
 

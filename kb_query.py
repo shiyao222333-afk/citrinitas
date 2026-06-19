@@ -46,7 +46,7 @@ from docx import Document
 from bs4 import BeautifulSoup
 from config.classifications import normalize_facet_values
 
-__version__ = "0.4.7"
+__version__ = "0.4.9"
 
 try:
     from fpdf import FPDF
@@ -764,6 +764,7 @@ def _ensure_collection(collection: str) -> bool:
                 "knowledge_type":   "keyword",
                 "language":        "keyword",
                 "access_level":     "keyword",
+                "needs_review":    "bool",     # S1 修复：补充缺失的 Payload Index
             }
             for field, schema in payload_index_fields.items():
                 try:
@@ -798,6 +799,29 @@ def create_collection(collection: str) -> dict:
             json={"vectors": {"size": EMBED_DIM, "distance": "Cosine"}},
             timeout=10
         )
+        # ── 创建 Payload Index（S1 修复）──
+        payload_index_fields = {
+            "content_type":     "keyword",
+            "domain":          "keyword",
+            "temporal_nature": "keyword",
+            "epistemic_status": "keyword",
+            "lifecycle":       "keyword",
+            "is_personal":     "bool",
+            "trust_score":      "integer",
+            "knowledge_type":   "keyword",
+            "language":        "keyword",
+            "access_level":     "keyword",
+            "needs_review":    "bool",
+        }
+        for field, schema in payload_index_fields.items():
+            try:
+                requests.put(
+                    f"{QDRANT_URL}/collections/{collection}/index",
+                    json={"field_name": field, "field_schema": schema},
+                    timeout=5
+                )
+            except Exception:
+                pass
         return {"ok": True, "collection": collection, "dim": EMBED_DIM}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -2051,7 +2075,7 @@ def auto_classify(text: str, metadata: dict = None) -> dict:
 ### epistemic_status（认知验证状态，FPF L0-L2）— 单选：
 {epistemic_list}
 
-### trust_score（可信度）— 1-5 整数，评分依据：
+### trust_score（可信度）— 0-5 整数（0=未评级，3=默认，5=最高），评分依据：
 {trust_labels}
 
 ### knowledge_type（知识子类型，仅 content_type=knowledge 时填，否则留空 ""）— 单选：
@@ -2096,7 +2120,7 @@ def auto_classify(text: str, metadata: dict = None) -> dict:
         "lifecycle": result.get("lifecycle", "published"),
         "temporal_nature": result.get("temporal_nature", "timeboxed"),
         "epistemic_status": result.get("epistemic_status", "unverified"),
-        "trust_score": result.get("trust_score", 3),
+        "trust_score": max(0, min(5, result.get("trust_score", 3))),
         "knowledge_type": result.get("knowledge_type", ""),
         "keywords": result.get("keywords", []),
         "title": result.get("title", ""),
@@ -3113,6 +3137,7 @@ def search_by_doc_id(
                 "trust_score":     payload.get("trust_score", 3),
                 "is_canonical":    payload.get("is_canonical", True),
                 "is_archived":     payload.get("is_archived", False),
+                "needs_review":    payload.get("needs_review", False),   # F4 修复
                 "relations":       payload.get("relations", []),
                 "keywords":        payload.get("keywords", []),
                 "auto_summary":    payload.get("auto_summary", ""),

@@ -142,7 +142,7 @@ LLM 自由输出任意精度的 UDC 类号，如 `"621"` / `"621.39"` / `"621:00
 |--------|------|------|
 | `knowledge_type` | string | 知识子类型（11种） |
 | `is_personal` | boolean | 是否个人化 |
-| `trust_score` | int | 可信度 1-5 |
+| `trust_score` | int | 可信度 0-5（0=未评级，3=默认，5=最高） |
 | `tags` | array[string] | 自定义标签 |
 | `is_canonical` | boolean | 是否为主知识点 |
 | `relations` | array[object] | 通用关系数组 `{type, doc_id}` |
@@ -327,7 +327,7 @@ LLM 分析文本语义推断的字段。**后备来源**：文件无 `title`/`au
 | `udc_code` | 文本精确主题 → UDC 细分码 |
 | `keywords` | 提取 3-8 个关键词 |
 | `auto_summary` | 生成 ≤100 字摘要 |
-| `trust_score` | 评估来源权威度 1-5 |
+| `trust_score` | 评估来源权威度 0-5（0=未评级） |
 | `knowledge_type` | 仅 content_type=knowledge 时推断子类型 |
 | `is_personal` | 判断是否个人经验 |
 | `lifecycle` | 推断工作流阶段（默认 `published`） |
