@@ -10,14 +10,9 @@ from nicegui import ui
 
 import kb_query
 from utils.state import STATE
+from utils.ui_shared import build_left_drawer, EMBED_PRESETS
 
 # 嵌入模型预设（从 main.py 复制）
-EMBED_PRESETS = {
-    "qwen3-embedding": "qwen3-embedding:4b",
-    "bge-m3": "bge-m3:latest",
-    "nomic-embed-text": "nomic-embed-text:latest",
-    "mxbai-embed-large": "mxbai-embed-large:latest",
-}
 
 # .env 文件路径
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -49,7 +44,6 @@ def _save_env(kv: dict):
 @ui.page("/config")
 def page_config():
     """引擎配置页面（/config）—— 配置底层引擎参数"""
-    from main import build_left_drawer
 
     build_left_drawer()
 

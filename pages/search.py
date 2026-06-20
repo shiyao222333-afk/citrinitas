@@ -13,12 +13,12 @@ from nicegui import ui
 import kb_query
 from utils.ui_shared import render_chunk_card
 from utils.state import STATE
+from utils.ui_shared import build_left_drawer
 
 
 @ui.page("/search")
 def page_search():
     """智能检索页面（/search）—— 语义搜索 + AI 问答"""
-    from main import build_left_drawer
 
     build_left_drawer()
 
@@ -141,7 +141,6 @@ def page_search():
                             render_chunk_card(c, i+1)
                     STATE["last_search"] = result
 
-                from main import refresh_system_state
                 refresh_system_state()
             except Exception as ex:
                 with results_area:

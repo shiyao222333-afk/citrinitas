@@ -22,12 +22,12 @@ from utils.file_handler import (
     SIZE_LIMIT_MB, FORMAT_DISPLAY_NAMES,
 )
 from utils.state import STATE
+from utils.ui_shared import build_left_drawer
 
 
 @ui.page("/")
 def page_ingest():
     """文档注入页面（/）—— 两阶段智能摄入：内容准备 → AI 分析 + 人工确认 → 入库"""
-    from main import build_left_drawer
 
     build_left_drawer()
 
@@ -341,7 +341,6 @@ def page_ingest():
                     PANEL_VALUES.clear()
                     result_container.clear()
                     advanced_container.clear()
-                    from main import refresh_system_state
                     refresh_system_state()
                 else:
                     ui.notify(f"❌ 摄入失败: {result.get('error', '?')}", type="negative")
