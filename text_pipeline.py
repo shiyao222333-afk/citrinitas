@@ -458,7 +458,6 @@ def ocr_image(image_path: str) -> dict:
                 "quality": quality,
                 "model": "PaddleOCR",
             }
-            }
     except Exception as e:
         return {"ok": False, "error": f"OCR 引擎初始化失败: {e}"}
 
