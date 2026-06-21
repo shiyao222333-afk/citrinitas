@@ -57,13 +57,14 @@ def startup():
 
 def _auto_shutdown():
     CHECK = 3
-    IDLE_MAX = 3
-    time.sleep(10)
+    IDLE_MAX = 5  # 连续5次失败才退出（避免偶发超时误判）
+    time.sleep(15)  # 启动后等15秒再开始检测（给 NiceGUI 足够的启动时间）
     idle = 0
     while True:
         time.sleep(CHECK)
         try:
-            _r.get("http://localhost:8080", timeout=2)
+            # 用 127.0.0.1 而非 localhost（Windows 下 localhost 可能走 IPv6 ::1，导致连接失败）
+            _r.get("http://127.0.0.1:8080", timeout=2)
             idle = 0
         except Exception:
             idle += 1
