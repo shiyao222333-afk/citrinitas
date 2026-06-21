@@ -80,8 +80,8 @@ def page_ingest():
                     temp_path = None
                     try:
                         import tempfile
-                        file_bytes = e.content.read()
-                        fname = e.name
+                        file_bytes = await e.file.read()
+                        fname = e.file.name
                         fsize = len(file_bytes)
                         if fsize > SIZE_LIMIT_MB * 1024 * 1024:
                             ui.notify(f"⚠️ 文件 {fname} 超过 {SIZE_LIMIT_MB}MB 上限", type="warning")
@@ -168,8 +168,8 @@ def page_ingest():
                     temp_path = None
                     try:
                         import tempfile
-                        file_bytes = e.content.read()
-                        fname = e.name
+                        file_bytes = await e.file.read()
+                        fname = e.file.name
 
                         # 保存到临时文件
                         suffix = os.path.splitext(fname)[1] or ".tmp"
@@ -181,13 +181,13 @@ def page_ingest():
                         text = result.get("ocr_text", "")
                         content_text.set_value(text)
                         ingest_content = text
-                        ingest_source = f"OCR: {e.name}"
-                        source_label.set_text(f"来源：OCR - {e.name}")
+                        ingest_source = f"OCR: {e.file.name}"
+                        source_label.set_text(f"来源：OCR - {e.file.name}")
                         ingest_method = "ocr"
                         STATE["ingest_content"] = text
-                        STATE["ingest_source"] = f"OCR: {e.name}"
+                        STATE["ingest_source"] = f"OCR: {e.file.name}"
                         STATE["ingest_method"] = "ocr"
-                        STATE["source_path"] = f"ocr:{e.name}"  # OCR 来源标记（无源文件路径）
+                        STATE["source_path"] = f"ocr:{e.file.name}"  # OCR 来源标记（无源文件路径）
                         ocr_result_label.set_text(f"✅ 识别完成，{len(text)} 字")
                         if result.get("needs_correction"):
                             ocr_result_label.set_text(f"⚠️ 识别质量较低，建议 AI 纠错 ({len(text)} 字)")
