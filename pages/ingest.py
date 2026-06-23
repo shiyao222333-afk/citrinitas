@@ -68,13 +68,15 @@ def page_ingest():
                 ui.markdown(f"📄 文本格式：{' · '.join(fmt_parts)}").classes("text-sm text-gray-500")
                 ui.markdown(f"🖼️ 图片格式（OCR）：{' · '.join(img_parts)}").classes("text-sm text-gray-400")
                 upload = ui.upload(
-                    label="拖拽或点击上传文件",
+                    label="拖拽或点击上传文件（支持多选）",
                     auto_upload=True,
                     max_file_size=SIZE_LIMIT_MB * 1024 * 1024,
-                    multiple=False,
+                    multiple=True,
                 ).classes("w-full").props("accept='.txt,.md,.json,.csv,.pdf,.epub,.html,.htm,.srt,.docx,.pptx,.png,.jpg,.jpeg,.bmp,.webp,.tiff'")
 
                 up_result = ui.label("").classes("text-sm")
+                batch_result_panel = ui.column().classes("w-full mt-2 gap-1")
+                batch_summary = ui.label("").classes("text-sm font-bold mt-2")
                 ocr_btn_container = ui.row().classes("w-full gap-2 mt-1")
 
                 async def on_ocr_start():
@@ -186,17 +188,91 @@ def page_ingest():
                         auto_meta = auto_meta_result.get("flat", {}) if isinstance(auto_meta_result, dict) else {}
                         STATE["auto_metadata"] = auto_meta
 
+                        # ═══ 批量自动摄入（v0.9.0 D5） ═══
+                        # 直接走全管道：分类 → 置信度检查 → 入库/待审核/死信
+                        try:
+                            # 1. 分类
+                            cls_result = await asyncio.to_thread(
+                                classify_pipeline.classify_document,
+                                text, auto_meta, STATE.get("current_project", "通用"),
+                            )
+                            if cls_result and cls_result.get("ok"):
+                                annotated = cls_result.get("annotated", {})
+                                classification = cls_result.get("classification", {})
+                                field_sources = dict(annotated.get("field_sources", {}))
+                                overall_conf = annotated.get("overall_confidence", 0.0)
+                            else:
+                                classification = {"content_type": "other"}
+                                field_sources = {}
+                                overall_conf = 0.0
+
+                            # 2. 置信度阈值检查
+                            conf_low = float(os.environ.get("KB_CONFIDENCE_LOW", "0.40"))
+                            conf_high = float(os.environ.get("KB_CONFIDENCE_HIGH", "0.75"))
+
+                            if overall_conf < conf_low:
+                                # 死信
+                                dlq_entry = {
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    "confidence": overall_conf,
+                                    "reason": f"置信度 {overall_conf:.0%} < {conf_low:.0%}",
+                                    "content": text[:500],
+                                    "metadata": {**auto_meta, **classification},
+                                    "source": fname,
+                                }
+                                dlq_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "local_data", "dead_letter")
+                                os.makedirs(dlq_dir, exist_ok=True)
+                                dlq_fp = os.path.join(dlq_dir, f"dlq_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{fname}.json")
+                                with open(dlq_fp, "w", encoding="utf-8") as df:
+                                    json.dump(dlq_entry, df, ensure_ascii=False)
+                                with batch_result_panel:
+                                    with ui.card().classes("w-full p-2"):
+                                        ui.label(f"🗑️ {fname}").classes("text-sm font-bold")
+                                        ui.badge("死信", color="red").classes("text-xs")
+                                        ui.label(f"置信度 {overall_conf:.0%} < {conf_low:.0%}，已入死信队列").classes("text-xs text-gray-500")
+                            else:
+                                # 入库
+                                needs_review = overall_conf < conf_high
+                                ingest_result = await asyncio.to_thread(
+                                    kb_query.ingest,
+                                    text=text,
+                                    metadata={
+                                        **classification,
+                                        "source_path": fname,
+                                        "ingest_method": "upload",
+                                        "needs_review": needs_review,
+                                    },
+                                    collection=STATE["active_collection"],
+                                    field_sources=field_sources,
+                                    overall_confidence=overall_conf,
+                                )
+                                if ingest_result.get("ok"):
+                                    with batch_result_panel:
+                                        with ui.card().classes("w-full p-2"):
+                                            with ui.row().classes("items-center gap-2"):
+                                                ui.label(f"✅ {fname}").classes("text-sm font-bold text-green-400")
+                                                if needs_review:
+                                                    ui.badge("待审核", color="orange").classes("text-xs")
+                                                ui.label(f"置信度 {overall_conf:.0%}").classes("text-xs text-gray-500")
+                                            ui.label(f"分类: {classification.get('content_type', '?')} | 领域: {', '.join(classification.get('domain', []))}").classes("text-xs text-gray-400")
+                                else:
+                                    with batch_result_panel:
+                                        with ui.card().classes("w-full p-2"):
+                                            ui.label(f"❌ {fname}").classes("text-sm font-bold text-red-400")
+                                            ui.label(f"入库失败: {ingest_result.get('error', '?')}").classes("text-xs text-gray-500")
+                        except Exception as batch_ex:
+                            with batch_result_panel:
+                                with ui.card().classes("w-full p-2"):
+                                    ui.label(f"❌ {fname}").classes("text-sm font-bold text-red-400")
+                                    ui.label(f"处理异常: {batch_ex}").classes("text-xs text-gray-500")
+
+                        # 保留单文件模式兼容（填充到编辑区供手动修改后重新摄入）
                         ingest_content = text
                         content_text.set_value(text)
                         ingest_source = f"文件: {fname}"
                         source_label.set_text(f"来源：{fname}")
                         STATE["ingest_content"] = text
                         STATE["ingest_source"] = fname
-                        if not is_ocr:
-                            # 普通文本文件，method/source_path 统一设置
-                            ingest_method = "upload"
-                            STATE["ingest_method"] = "upload"
-                            STATE["source_path"] = fname
 
                         # 显示自动元数据
                         if auto_meta:

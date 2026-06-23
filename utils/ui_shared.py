@@ -192,19 +192,16 @@ def build_left_drawer():
 
         # 导航链接
         with ui.column().classes("w-full px-2 gap-1"):
-            ui.link("📥 文档注入", "/").classes(
+            ui.link("📥 摄入", "/").classes(
                 "w-full text-left p-2 rounded hover:bg-blue-700 transition no-underline text-white"
             )
-            ui.link("💬 智能检索", "/search").classes(
+            ui.link("🔍 搜索", "/search").classes(
                 "w-full text-left p-2 rounded hover:bg-blue-700 transition no-underline text-white"
             )
-            ui.link("📄 文档管理", "/manage").classes(
+            ui.link("📚 知识库管理", "/hub").classes(
                 "w-full text-left p-2 rounded hover:bg-blue-700 transition no-underline text-white"
             )
-            ui.link("🗂️ 知识中枢", "/hub").classes(
-                "w-full text-left p-2 rounded hover:bg-blue-700 transition no-underline text-white"
-            )
-            ui.link("⚙️ 引擎配置", "/config").classes(
+            ui.link("⚙️ 设置", "/config").classes(
                 "w-full text-left p-2 rounded hover:bg-blue-700 transition no-underline text-white"
             )
 

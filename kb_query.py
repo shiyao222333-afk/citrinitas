@@ -46,6 +46,7 @@ from docx import Document
 from bs4 import BeautifulSoup
 from config.classifications import normalize_facet_values, CLASSIFY_RULES
 from sparse_encoder import encode_sparse, encode_sparse_query
+from utils.activity_log import log_activity
 
 from qconst import (
     PROJECT_DIR, QDRANT_URL, DEFAULT_COLLECTION,
@@ -397,8 +398,22 @@ def ingest(
             continue
         result = step_fn(state)
         if not result.get("ok"):
+            log_activity(
+                action="ingest_failed",
+                doc_id=state.get("doc_id", ""),
+                detail=result.get("error", f"步骤 {step_name} 失败"),
+                collection=state["collection"],
+                source=state.get("source", ""),
+            )
             return result
 
+    log_activity(
+        action="ingest_success",
+        doc_id=state["doc_id"],
+        detail=state.get("source", ""),
+        collection=state["collection"],
+        source="文件上传" if state.get("file_path") else "手动输入",
+    )
     return {
         "ok": True,
         "chunks": len(state["chunks"]),
