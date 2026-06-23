@@ -755,12 +755,15 @@ def _process_file(filepath: str, cancel_event: threading.Event = None):
                     source=filename,
                 )
                 ocr_text_parts = []
+                _ocr_cache = None  # OCR 结果缓存（避免多页重复调用）
                 for p in pages:
                     if p.get("images"):
                         # 对图片型页面做 OCR（复用 _ocr_image 对页面截图的能力）
                         # 注：PDF 页面级 OCR 通过重读文件实现
                         try:
-                            ocr_result = _ocr_image(filepath)
+                            if _ocr_cache is None:
+                                _ocr_cache = _ocr_image(filepath)  # 首次调用，缓存结果
+                            ocr_result = _ocr_cache  # 后续页面复用缓存
                             if ocr_result.get("ok"):
                                 page_text = ocr_result.get("text", "")
                                 if page_text.strip():
