@@ -99,6 +99,7 @@ def _load_state() -> dict:
     state = {}
     if not os.path.isfile(STATE_FILE):
         return state
+    removals_snapshot = set()
     try:
         with _state_lock:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -113,10 +114,12 @@ def _load_state() -> dict:
                             state[fname] = entry
                     except json.JSONDecodeError:
                         pass
+            # 在锁内快照待删除集合（避免与 _cleanup_expired_states 清除竞争）
+            removals_snapshot = _pending_removals.copy()
     except Exception:
         pass
     # 过滤掉待删除的文件
-    for fname in _pending_removals:
+    for fname in removals_snapshot:
         state.pop(fname, None)
     return state
 
@@ -143,7 +146,8 @@ def _remove_state(filename: str):
     实际重写在 _cleanup_expired_states() 中批量执行。
     _load_state() 会自动过滤 _pending_removals 中的文件。
     """
-    _pending_removals.add(filename)
+    with _state_lock:
+        _pending_removals.add(filename)
 
 
 def _get_file_state(filename: str) -> dict | None:
@@ -698,6 +702,10 @@ def _process_file(filepath: str, cancel_event: threading.Event = None):
                 continue
             return
 
+        # 提取后检查取消信号（OCR 可能耗时很长）
+        if _cancelled():
+            return
+
         if not pages or not any(p.get("text", "").strip() for p in pages):
             result = _handle_failure(filepath, filename, "extract", "所有页面提取为空", retry_count)
             if result == "retry":
@@ -726,6 +734,9 @@ def _process_file(filepath: str, cancel_event: threading.Event = None):
         retention = decide_file_retention(page_analyses)
 
         # ── AI 分类 ──
+        if _cancelled():
+            return
+            
         try:
             classify_result = classify_document(full_text, file_metadata={"source_path": filepath})
         except Exception as e:
@@ -764,6 +775,9 @@ def _process_file(filepath: str, cancel_event: threading.Event = None):
         needs_review = overall_conf < CONFIDENCE_HIGH
 
         # ── 摄入 ──
+        if _cancelled():
+            return
+            
         try:
             ingest_result = kb_query.ingest(
                 text=full_text,
@@ -1047,9 +1061,17 @@ def _scan_existing_files_v2(queue: Queue):
 
 
 def _rescue_orphaned_files(queue: Queue):
-    """定期扫描 inbox，救回因队列溢出被丢弃的文件。"""
+    """定期扫描 inbox，救回因队列溢出被丢弃的文件。
+    
+    基础设施宕机时跳过 — 避免 retry 文件被反复入队→检查→标记 retry 的死循环。
+    """
     if not os.path.isdir(INBOX_DIR):
         return
+    
+    # 基础设施检查 — infra down 时不救援，等恢复后 _recover_retry_files 会处理
+    if not _watch_stats.get("infra_ok", True):
+        return
+    
     state = _load_state()
     rescued = 0
     for filename in os.listdir(INBOX_DIR):
@@ -1190,6 +1212,9 @@ def _cleanup_expired_states():
             with open(STATE_FILE, "w", encoding="utf-8") as f:
                 for line in lines:
                     f.write(line + "\n")
+            
+            # 清除已应用的 pending removals（锁内，防竞争）
+            _pending_removals.clear()
 
         reason = "force" if force else "scheduled"
         total_cleaned = expired_removed + dedup_saved + pending_applied
@@ -1205,9 +1230,6 @@ def _cleanup_expired_states():
                 action="watch_v2_state_cleanup",
                 detail=f"清理 {' + '.join(parts)} 条 ({reason}, {file_size//1024} KB)",
             )
-        
-        # 清除已应用的 pending removals
-        _pending_removals.clear()
     except Exception:
         pass
 
