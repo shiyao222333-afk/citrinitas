@@ -74,7 +74,6 @@ watch:
 watch_v2:
   inbox_dir: "data/inbox"        # 统一收件箱目录
   state_file: "data/file_state.jsonl"  # 状态追踪文件（append-only JSONL）
-  poll_interval: 1.0             # 文件监控轮询间隔（秒）
   write_complete_checks: 2       # 文件写入完成确认次数
   write_check_interval: 0.5      # 写入检查间隔（秒）
   max_file_size_mb: 50           # 单文件大小上限（0 = 不限制）
@@ -85,7 +84,6 @@ watch_v2:
   retention:
     # 逐页分析后，文件级保留 = min(每页可丢性)
     # 任一页含非文本元素 → 保留整个文件
-    keep_file: "data/inbox"      # 保留在原目录（不入 processed/）
     text_density_threshold: 0.3  # 文本密度低于此值 → 视为非文本页
     ocr_conf_threshold: 0.7      # OCR 置信度低于此值 → 不可靠
     # 保留场景（保留原文件）: 表格/图片/公式/低密度页面

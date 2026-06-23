@@ -244,10 +244,6 @@ WATCH_V2_INBOX_DIR = _yaml_or_env(
 WATCH_V2_STATE_FILE = _yaml_or_env(
     "watch_v2.state_file", "KB_WATCH_V2_STATE_FILE", "data/file_state.jsonl",
 )
-WATCH_V2_POLL_INTERVAL = _yaml_or_env(
-    "watch_v2.poll_interval", "KB_WATCH_V2_POLL_INTERVAL", 1.0, cast=float,
-    validator=lambda v: None if v > 0 else "must be > 0",
-)
 WATCH_V2_WRITE_COMPLETE_CHECKS = _yaml_or_env(
     "watch_v2.write_complete_checks", "KB_WATCH_V2_WRITE_COMPLETE_CHECKS", 2, cast=int,
     validator=lambda v: None if v >= 1 else "must be >= 1",
@@ -268,10 +264,7 @@ WATCH_V2_QUEUE_MAX_SIZE = _yaml_or_env(
     "watch_v2.queue_max_size", "KB_WATCH_V2_QUEUE_MAX_SIZE", 100, cast=int,
     validator=lambda v: None if v >= 1 else "must be >= 1",
 )
-# 保留策略
-WATCH_V2_KEEP_FILE = _yaml_or_env(
-    "watch_v2.retention.keep_file", "KB_WATCH_V2_KEEP_FILE", "data/inbox",
-)
+# 保留策略（内容驱动，逐页 WLNK 决策）
 WATCH_V2_TEXT_DENSITY_THRESHOLD = _yaml_or_env(
     "watch_v2.retention.text_density_threshold", "KB_WATCH_V2_TEXT_DENSITY_THRESHOLD", 0.3, cast=float,
     validator=lambda v: None if 0 <= v <= 1 else "must be 0-1",
@@ -326,10 +319,14 @@ def _print_summary():
     print(f"  confidence.low          = {CONFIDENCE_LOW}")
     print(f"  confidence.high         = {CONFIDENCE_HIGH}")
     print(f"  table_split_threshold   = {TABLE_SPLIT_THRESHOLD}")
-    print(f"  watch.poll_interval     = {WATCH_POLL_INTERVAL}s")
-    print(f"  watch.max_file_size_mb  = {WATCH_MAX_FILE_SIZE_MB}")
-    print(f"  watch.dlq_ttl_days      = {WATCH_DLQ_TTL_DAYS}")
-    print(f"  watch.queue_max_size    = {WATCH_QUEUE_MAX_SIZE}")
-    print(f"  watch_v2.inbox_dir      = {WATCH_V2_INBOX_DIR}")
-    print(f"  watch_v2.state_file     = {WATCH_V2_STATE_FILE}")
-    print(f"  watch_v2.max_retries    = {WATCH_V2_MAX_AUTO_RETRIES}")
+    print(f"  watch_v2.inbox_dir         = {WATCH_V2_INBOX_DIR}")
+    print(f"  watch_v2.state_file        = {WATCH_V2_STATE_FILE}")
+    print(f"  watch_v2.max_file_size_mb  = {WATCH_V2_MAX_FILE_SIZE_MB}")
+    print(f"  watch_v2.queue_max_size    = {WATCH_V2_QUEUE_MAX_SIZE}")
+    print(f"  watch_v2.max_retries       = {WATCH_V2_MAX_AUTO_RETRIES}")
+    print(f"  watch_v2.retry_delay       = {WATCH_V2_AUTO_RETRY_DELAY}s")
+    print(f"  watch_v2.infra_retry       = {WATCH_V2_INFRA_RETRY_INTERVAL}s")
+    print(f"  watch_v2.dlq_ttl_days      = {WATCH_V2_DLQ_TTL_DAYS}")
+    print(f"  watch_v2.processing_timeout= {WATCH_V2_PROCESSING_TIMEOUT}s")
+    print(f"  watch_v2.text_density_thr  = {WATCH_V2_TEXT_DENSITY_THRESHOLD}")
+    print(f"  watch_v2.ocr_conf_thr      = {WATCH_V2_OCR_CONF_THRESHOLD}")

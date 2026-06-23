@@ -37,7 +37,6 @@ from config.settings import (
     PROJECT_DIR,
     WATCH_V2_INBOX_DIR,
     WATCH_V2_STATE_FILE,
-    WATCH_V2_POLL_INTERVAL,
     WATCH_V2_WRITE_COMPLETE_CHECKS,
     WATCH_V2_WRITE_CHECK_INTERVAL,
     WATCH_V2_MAX_FILE_SIZE_MB,
@@ -715,6 +714,8 @@ def _process_file(filepath: str):
                 page_images=p.get("images"),
                 page_tables=p.get("tables"),
                 ocr_conf=p.get("ocr_conf"),
+                text_density_threshold=WATCH_V2_TEXT_DENSITY_THRESHOLD,
+                ocr_conf_threshold=WATCH_V2_OCR_CONF_THRESHOLD,
             )
             page_analyses.append(analysis)
             all_text_parts.append(p.get("text", ""))
@@ -726,7 +727,7 @@ def _process_file(filepath: str):
 
         # ── AI 分类 ──
         try:
-            classify_result = classify_document(full_text, file_path=filepath)
+            classify_result = classify_document(full_text, file_metadata={"source_path": filepath})
         except Exception as e:
             result = _handle_failure(filepath, filename, "classify", str(e), retry_count)
             if result == "retry":
@@ -781,9 +782,20 @@ def _process_file(filepath: str):
 
         if not ingest_result.get("ok"):
             error_msg = ingest_result.get("error", "摄入失败")
-            # 重复内容 → skip（不记录为失败）
+            # 重复内容 → 删除原文件（已入库）+ 标记 done
             if "duplicate" in error_msg.lower() or "重复" in error_msg:
-                _handle_failure(filepath, filename, "ingest", error_msg)
+                log_activity(
+                    action="watch_v2_duplicate_skipped",
+                    detail=f"文件已存在于知识库: {error_msg}",
+                    source=filename,
+                )
+                _append_state({"file": filename, "state": "done"})
+                _watch_stats["processed"] += 1
+                try:
+                    os.remove(filepath)
+                except OSError:
+                    pass
+                return
             else:
                 result = _handle_failure(filepath, filename, "ingest", error_msg, retry_count)
                 if result == "retry":
@@ -834,8 +846,17 @@ def _process_file(filepath: str):
             source=filename,
         )
 
-        # ── 处理成功，清理可能遗留的状态记录 ──
-        _remove_state(filename)
+        # ── 处理成功，清理/保留状态记录 ──
+        if needs_review:
+            # needs_review 状态已在上面写入，保留不清除
+            pass
+        else:
+            # 清理旧状态（retry/failed 等），但不写 done：
+            # 文件会被删除（keep_file=false），Qdrant content_hash 负责去重
+            _remove_state(filename)
+            if retention["keep_file"]:
+                # 文件保留 → 标记 done 防止重启后被重复处理
+                _append_state({"file": filename, "state": "done"})
         return  # 成功退出
 
 
@@ -914,6 +935,7 @@ def _processing_loop_v2(queue: Queue, stop_event: threading.Event):
 
     _watch_stats["running"] = True
 
+    loop_count = 0
     while not stop_event.is_set():
         with _heartbeat_lock:
             _heartbeat_time = time.time()
@@ -922,8 +944,13 @@ def _processing_loop_v2(queue: Queue, stop_event: threading.Event):
             filepath = queue.get(timeout=2.0)
         except Empty:
             _cleanup_expired_states()
+            # 定期救援扫描：救回因队列溢出被丢弃的文件
+            loop_count += 1
+            if loop_count % 30 == 0:  # ~60 秒一次
+                _rescue_orphaned_files(queue)
             continue
 
+        loop_count += 1
         filename = os.path.basename(filepath)
 
         if not os.path.isfile(filepath):
@@ -994,6 +1021,33 @@ def _scan_existing_files_v2(queue: Queue):
             queue.put(fp, timeout=0.5)
         except Exception:
             _watch_stats["skipped"] += 1
+
+
+def _rescue_orphaned_files(queue: Queue):
+    """定期扫描 inbox，救回因队列溢出被丢弃的文件。"""
+    if not os.path.isdir(INBOX_DIR):
+        return
+    state = _load_state()
+    rescued = 0
+    for filename in os.listdir(INBOX_DIR):
+        filepath = os.path.join(INBOX_DIR, filename)
+        if not os.path.isfile(filepath):
+            continue
+        if _is_temp_file(filename):
+            continue
+        entry = state.get(filename)
+        if entry and entry.get("state") in ("failed", "needs_review", "done"):
+            continue
+        try:
+            queue.put(filepath, timeout=0.1)
+            rescued += 1
+        except Exception:
+            break  # 队列满，下次循环再试
+    if rescued > 0:
+        log_activity(
+            action="watch_v2_rescue",
+            detail=f"救回 {rescued} 个遗漏文件",
+        )
 
 
 def _recover_retry_files(queue: Queue, stop_event: threading.Event):
