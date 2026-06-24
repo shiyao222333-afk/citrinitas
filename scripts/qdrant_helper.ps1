@@ -3,8 +3,10 @@
 # 输出：Qdrant 可执行文件路径（找到则输出路径并 exit 0；未找到输出空字符串并 exit 1）
 
 param(
-    [string]$Action = "detect",   # detect | install
-    [string]$ProjectDir = ""
+    [string]$Action = "detect",   # detect | install | health
+    [string]$ProjectDir = "",
+    [int]$MaxRetries = 30,        # health action: max retry count
+    [int]$RetryDelay = 2          # health action: seconds between retries
 )
 
 $ErrorActionPreference = "Stop"
@@ -205,6 +207,51 @@ log_level: INFO
         Write-Host "  [ERROR] Installed binary not found."
         exit 1
     }
+}
+
+# ─────────────────────────────────────────────
+# 3. 健康检查 — 轮询 Qdrant 端口直到响应（使用 TcpClient，避免 stdout 污染）
+#    参数: -MaxRetries 最大重试次数（默认 30）
+#          -RetryDelay 重试间隔秒数（默认 2）
+#    退出码: 0 = 健康, 1 = 超时未响应
+# ─────────────────────────────────────────────
+if ($Action -eq "health") {
+    for ($i = 1; $i -le $MaxRetries; $i++) {
+        $connected = $false
+        try {
+            $tcp = New-Object System.Net.Sockets.TcpClient
+            $iar = $tcp.BeginConnect("127.0.0.1", 6333, $null, $null)
+            $wait = $iar.AsyncWaitHandle.WaitOne(2000)
+            if ($wait) {
+                $tcp.EndConnect($iar) | Out-Null
+                $connected = $true
+            }
+            $tcp.Close()
+        } catch {}
+
+        if ($connected) {
+            # 只在多轮轮询时才输出"就绪"消息（单次检查安静通过）
+            if ($MaxRetries -gt 1) {
+                Write-Host "  Qdrant healthy (port 6333)"
+            }
+            Write-DetectResult "HEALTHY"
+            exit 0
+        }
+
+        # 进度消息 — 只在多轮轮询时显示
+        if ($MaxRetries -gt 1) {
+            Write-Host "  Waiting for Qdrant... ($i/$MaxRetries)"
+        }
+        if ($i -lt $MaxRetries) {
+            Start-Sleep -Seconds $RetryDelay
+        }
+    }
+
+    # 全部重试失败
+    Write-Host "  [ERROR] Qdrant did not start within $($MaxRetries * $RetryDelay) seconds."
+    Write-Host "  Please check Qdrant installation manually."
+    Write-DetectResult "UNHEALTHY"
+    exit 1
 }
 
 Write-Host "  [ERROR] Unknown action: $Action"

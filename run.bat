@@ -134,6 +134,12 @@ REM 检查检测结果
 if "!QDRANT_RESULT!"=="API_ALREADY_RUNNING" (
     echo   Qdrant is already running ^(API responding on port 6333^)
     set "QDRANT_SKIP=0"
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_DIR%scripts\qdrant_helper.ps1" -Action health -MaxRetries 3 -RetryDelay 2 >NUL 2>&1
+    if !ERRORLEVEL! NEQ 0 (
+        echo   [WARNING] Qdrant health check failed. Continuing anyway, may fail later.
+    ) else (
+        echo   Qdrant healthy ^(port 6333^)
+    )
     goto :skip_qdrant
 )
 
@@ -190,27 +196,13 @@ if exist "!QDRANT_DIR!\config\config.yaml" (
 powershell -Command "!PS_CMD!"
 set "QDRANT_SKIP=0"
 
-REM ============================================================
-REM  Step 5b: Qdrant 健康检查 -- 轮询 /health (P0-3)
-REM ============================================================
-:check_qdrant_health
-set /a QDRANT_RETRY=0
-:retry_qdrant
-timeout /t 2 /nobreak > nul
-set /a QDRANT_RETRY+=1
-curl.exe -s --connect-timeout 2 -o NUL "http://127.0.0.1:6333/health" 2>NUL
-if %ERRORLEVEL% EQU 0 (
-    echo   Qdrant healthy ^(port 6333^)
-    goto :skip_qdrant
+REM 健康检查 — 轮询 Qdrant 端口（TcpClient，无 curl.exe 依赖）
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_DIR%scripts\qdrant_helper.ps1" -Action health -MaxRetries 30 -RetryDelay 2
+if !ERRORLEVEL! NEQ 0 (
+    pause
+    exit /b 1
 )
-if !QDRANT_RETRY! LSS 30 (
-    echo   Waiting for Qdrant... ^(!QDRANT_RETRY!/30^)
-    goto :retry_qdrant
-)
-echo   [ERROR] Qdrant did not start within 60 seconds.
-echo   Please check Qdrant installation manually.
-pause
-exit /b 1
+goto :skip_qdrant
 
 :skip_qdrant
 
