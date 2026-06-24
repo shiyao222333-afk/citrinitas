@@ -94,7 +94,7 @@ if %ERRORLEVEL% EQU 0 (
         echo   Checking embed model...
         ollama list 2>NUL | findstr /C:"qwen3-embedding" >NUL
         if %ERRORLEVEL% EQU 0 (
-            echo   Embed model ready (qwen3-embedding^)
+            echo   Embed model ready: qwen3-embedding
         ) else (
             echo   [^^!] Embed model not found. Please run: ollama pull qwen3-embedding:4b
         )
@@ -107,8 +107,7 @@ if %ERRORLEVEL% EQU 0 (
     echo   Install from: https://ollama.com
 )
 
-REM  LLM API 可用性检查 (P1-11: classify_document 依赖)
-powershell -NoProfile -File "%PROJECT_DIR%scripts\check_llm.ps1" -ProjectDir "%PROJECT_DIR%"
+REM  LLM API 检查已移除 — 应用启动不依赖 LLM，运行时遇缺失会优雅降级
 
 REM ============================================================
 REM  Step 5: 启动 Qdrant（自动检测 + 自动安装）
@@ -125,7 +124,7 @@ REM       - "API_ALREADY_RUNNING" → Qdrant 已在运行（API 端口有响应�
 REM       - "<path>"             → 找到 Qdrant 二进制文件
 REM       - ""                   → 未找到
 echo   Detecting Qdrant...
-powershell -NoProfile -File "%PROJECT_DIR%scripts\qdrant_helper.ps1" -Action detect -ProjectDir "%PROJECT_DIR%" >NUL 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_DIR%scripts\qdrant_helper.ps1" -Action detect -ProjectDir "%PROJECT_DIR%" >NUL 2>&1
 set "QDRANT_RESULT="
 set "QDRANT_TMP=%TEMP%\qdrant_detect_result.txt"
 if exist "!QDRANT_TMP!" (
