@@ -22,8 +22,8 @@
 
 | # | 问题 | 位置 | 状态 |
 |---|------|------|------|
-| **F6** | 无优雅关闭，Ctrl+C 时状态可能不一致 | `watcher_v2.py` 全局 | ⬜ 待修复 |
-| **F7** | 无配置热重载，改 `pipe_cfg.yaml` 必须重启 | `watcher_v2.py` / `config/settings.py` | ⬜ 待修复 |
+| **F6** | 无优雅关闭，Ctrl+C 时状态可能不一致 | `watcher_v2.py` 全局 | ✅ 已修复（commit 待推送） |
+| **F7** | 无配置热重载，改 `pipe_cfg.yaml` 必须重启 | `watcher_v2.py` / `config/settings.py` | ⬜ 延后到 v1.1.0 |
 
 ## 修复顺序
 

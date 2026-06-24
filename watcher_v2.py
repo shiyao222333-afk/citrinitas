@@ -1253,6 +1253,9 @@ def _processing_loop_v2(queue: Queue, stop_event: threading.Event):
         # 处理文件
         _process_file_with_timeout(filepath)
 
+    # 优雅退出：把所有非终态改成 retry，下次启动时自动恢复
+    _fix_incomplete_states()
+
     with _stats_lock: _watch_stats["running"] = False
     log_activity(action="watch_v2_stopped", detail="守望文件夹 v2 处理循环已停止")
 
@@ -1314,6 +1317,29 @@ def _rescue_orphaned_files(queue: Queue):
         log_activity(
             action="watch_v2_rescue",
             detail=f"救回 {rescued} 个遗漏文件",
+        )
+
+
+def _fix_incomplete_states():
+    """优雅退出时，把所有非终态改成 retry，下次启动时自动恢复。"""
+    FINAL_STATES = {"done", "failed", "needs_review"}
+    state = _load_state()
+    fixed = 0
+    for fname, entry in state.items():
+        if entry.get("state") in FINAL_STATES:
+            continue
+        # 非终态 → 改成 retry
+        _append_state({
+            "file": fname,
+            "state": "retry",
+            "step": "graceful_exit",
+            "error": "优雅退出时状态未完，标记为重试",
+        })
+        fixed += 1
+    if fixed > 0:
+        log_activity(
+            action="watch_v2_fixed_incomplete",
+            detail=f"优雅退出时修复 {fixed} 个未完成状态",
         )
 
 
@@ -1664,9 +1690,25 @@ def _remove_lock_file():
         pass
 
 
+def _signal_handler(signum, frame):
+    """SIGINT/SIGTERM 信号处理器 — 设置 stop_event，让处理循环优雅退出。"""
+    global _stop_event
+    if _stop_event:
+        _stop_event.set()
+        log_activity(action="watch_v2_signal", detail=f"收到信号 {signum}，开始优雅关闭")
+
+
 def start_watcher_v2() -> threading.Thread | None:
     """启动守望文件夹 v2 守护进程。"""
     global _observer, _worker_thread, _queue, _stop_event
+
+    # 注册信号处理器（仅主线程可注册）
+    try:
+        import signal
+        signal.signal(signal.SIGINT, _signal_handler)
+        signal.signal(signal.SIGTERM, _signal_handler)
+    except (ValueError, OSError):
+        pass  # 非主线程环境（如 Windows 服务）静默跳过
 
     if not _check_lock_file():
         log_activity(
@@ -1714,8 +1756,8 @@ def start_watcher_v2() -> threading.Thread | None:
 
 
 def stop_watcher_v2():
-    """停止守望文件夹 v2 守护进程。"""
-    global _observer, _stop_event
+    """停止守望文件夹 v2 守护进程（优雅关闭）。"""
+    global _observer, _stop_event, _worker_thread
 
     if _stop_event:
         _stop_event.set()
@@ -1724,8 +1766,14 @@ def stop_watcher_v2():
         _observer.stop()
         _observer.join(timeout=5)
 
+    # 等待处理线程退出（最多等 PROCESS_TIMEOUT 秒，避免无限等待）
     if _worker_thread and _worker_thread.is_alive():
-        _worker_thread.join(timeout=10)
+        _worker_thread.join(timeout=WATCH_V2_PROCESS_TIMEOUT)
+        if _worker_thread.is_alive():
+            log_activity(
+                action="watch_v2_stop_timeout",
+                detail=f"处理线程在 {WATCH_V2_PROCESS_TIMEOUT}s 内未退出，强制退出",
+            )
 
     with _stats_lock: _watch_stats["running"] = False
     _remove_lock_file()
