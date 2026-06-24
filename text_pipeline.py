@@ -758,6 +758,7 @@ def _embed(texts: list[str], model: str = EMBED_MODEL) -> list[list[float]]:
         logger.warning(f"[Embed] 批量嵌入失败，回退到逐条: {e}")
     # 逐条回退
     vectors = []
+    _dim = 0  # 从首个成功结果推导维度
     for i, text in enumerate(texts):
         try:
             resp = requests.post(
@@ -766,11 +767,18 @@ def _embed(texts: list[str], model: str = EMBED_MODEL) -> list[list[float]]:
                 timeout=60
             )
             resp.raise_for_status()
-            vectors.append(resp.json()["embedding"])
+            vec = resp.json()["embedding"]
+            if _dim == 0:
+                _dim = len(vec)
+            vectors.append(vec)
         except Exception:
             if len(texts) == 1:
                 raise
-            logger.warning(f"[Embed] 块 #{i} 嵌入失败（{len(text)} 字符），已跳过")
+            if _dim == 0:
+                logger.warning(f"[Embed] 首个块 #{i} 嵌入失败（{len(text)} 字符），无法推导维度，已跳过")
+                continue
+            logger.warning(f"[Embed] 块 #{i} 嵌入失败（{len(text)} 字符），用零向量占位（{_dim} 维）")
+            vectors.append([0.0] * _dim)
     return vectors
 
 
