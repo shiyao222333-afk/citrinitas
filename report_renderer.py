@@ -11,7 +11,6 @@ import base64
 import tempfile
 import html
 import subprocess
-from typing import Optional
 
 from qconst import PROJECT_DIR
 from datetime import datetime, timezone

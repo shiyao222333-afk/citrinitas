@@ -9,23 +9,13 @@ Extracted from kb_query.py (A4 refactor).
   报告: HTML 含公式渲染/图片嵌入/表格分页 → PDF
 """
 import requests
-import json
 import os
 import re
-import subprocess
-import io
-import base64
-import math
-import tempfile
-import html
-import hashlib
 from collections import defaultdict
-from typing import Optional
-from datetime import datetime, timezone
 
 from qconst import (
     QDRANT_URL, DEFAULT_COLLECTION, PROJECT_DIR,
-    _check_qdrant, OLLAMA_URL, EMBED_MODEL, EMBED_DIM,
+    _check_qdrant, EMBED_MODEL,
     SEARCH_TOP_K, SEARCH_SCORE_THRESHOLD,
     RERANK_ENABLED, RERANK_MODEL, RERANK_TOP_N,
     TABLE_SPLIT_THRESHOLD,
@@ -35,33 +25,9 @@ from text_pipeline import _embed
 from reranker import rerank_results, rerank_results_simple
 from sparse_encoder import encode_sparse_query
 
-try:
-    from fpdf import FPDF
-    from fpdf.enums import XPos, YPos
-except ImportError:
-    FPDF = None
-    XPos = None
-    YPos = None
-
-try:
-    from PIL import Image as PILImage
-    HAS_PIL = True
-except ImportError:
-    PILImage = None
-    HAS_PIL = False
-
 
 # v1.0.0: 报告渲染相关函数已移动到 report_renderer.py
-# 直接导入使用
-from report_renderer import (
-    img_to_b64,
-    img_tag,
-    cell_html,
-    pipe_table_to_html,
-    format_evidence_text,
-    render_report_html,
-    ensure_output_dir,
-)
+from report_renderer import render_report_html
 
 
 # TABLE_SPLIT_THRESHOLD — 从 pipe_cfg.yaml 统一导入（见 qconst 顶部）
@@ -379,10 +345,6 @@ def _call_llm_api(messages: list, base_url: str = None, api_key: str = None, mod
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
-
-
-# v1.0.0: 移动到 utils/llm_helpers.py
-from utils.llm_helpers import extract_json_block as _extract_json_block
 
 
 def _sanitize_html(text: str) -> str:
