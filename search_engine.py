@@ -53,6 +53,191 @@ except ImportError:
 
 # TABLE_SPLIT_THRESHOLD — 从 pipe_cfg.yaml 统一导入（见 qconst 顶部）
 
+# 有效过滤键（facet_filter 参数校验用）
+_VALID_FILTER_KEYS = {"content_type","domain","knowledge_type","tags","temporal_nature","epistemic_status","lifecycle","is_personal","trust_score_min"}
+
+
+def _build_qdrant_filter(facet_filter: dict) -> dict:
+    """从 facet_filter 构建 Qdrant 过滤条件（must 数组）。"""
+    if not facet_filter:
+        return None
+    _invalid_keys = set(facet_filter.keys()) - _VALID_FILTER_KEYS
+    if _invalid_keys:
+        print(f"[Search] facet_filter invalid keys (ignored): {_invalid_keys}")
+    must_conditions = []
+
+    def _add_match(key, vals):
+        must_conditions.append({
+            "key": key,
+            "match": {"value": vals[0]} if len(vals) == 1 else {"any": vals}
+        })
+
+    for key in ("content_type", "domain", "knowledge_type", "tags"):
+        if facet_filter.get(key):
+            _add_match(key, facet_filter[key])
+
+    for key in ("temporal_nature", "epistemic_status", "lifecycle"):
+        if facet_filter.get(key):
+            must_conditions.append({
+                "key": key,
+                "match": {"value": facet_filter[key]}
+            })
+
+    if "is_personal" in facet_filter:
+        must_conditions.append({
+            "key": "is_personal",
+            "match": {"value": facet_filter["is_personal"]}
+        })
+
+    if facet_filter.get("trust_score_min") is not None:
+        must_conditions.append({
+            "key": "trust_score",
+            "range": {"gte": facet_filter["trust_score_min"]}
+        })
+
+    return {"must": must_conditions} if must_conditions else None
+
+
+def _query_qdrant_rrf(
+    query: str,
+    query_vec: list,
+    top_k: int,
+    qdrant_filter: dict,
+    score_threshold: float,
+    collection: str = DEFAULT_COLLECTION,
+) -> list:
+    """执行 Qdrant RRF 混合查询 + 重排序，返回结果列表。"""
+    # ── 生成稀疏查询向量 ──
+    sparse_query = None
+    try:
+        sparse_query = encode_sparse_query(query)
+    except Exception as e:
+        print(f"[Search] 稀疏查询向量生成失败（降级为纯稠密搜索）: {e}")
+
+    # ── 搜索 Qdrant（原生混合查询：稠密 + 稀疏 → RRF 融合）──
+    try:
+        prefetch = []
+        if sparse_query:
+            prefetch.append({
+                "query": {"indices": sparse_query[0], "values": sparse_query[1]},
+                "using": "bm25",
+                "limit": top_k * 2,
+            })
+        prefetch.append({
+            "query": query_vec,
+            "using": "dense",
+            "limit": top_k * 2,
+        })
+
+        query_body = {
+            "prefetch": prefetch,
+            "query": {"fusion": "rrf"},
+            "limit": top_k,
+            "with_payload": True,
+        }
+        if qdrant_filter:
+            query_body["filter"] = qdrant_filter
+            query_body["params"] = {"acorn": {"enable": True, "max_selectivity": 0.4}}
+
+        resp = requests.post(
+            f"{QDRANT_URL}/collections/{collection}/points/query",
+            json=query_body,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        results = resp.json()["result"]["points"]
+
+        # 后过滤
+        if score_threshold and score_threshold > 0:
+            filtered = [r for r in results if r.get("score", 0) >= score_threshold]
+            if filtered:
+                results = filtered
+
+        # 重排序
+        try:
+            if RERANK_ENABLED:
+                results = rerank_results(query=query, results=results,
+                                       model=RERANK_MODEL, top_n=RERANK_TOP_N)
+        except Exception as e:
+            print(f"[Search] 重排序失败: {e}，尝试简单重排序")
+            try:
+                results = rerank_results_simple(query, results, top_n=RERANK_TOP_N)
+            except Exception as e2:
+                print(f"[Search] 简单重排序也失败: {e2}，使用原始排序")
+        return results
+    except Exception as e:
+        raise e
+
+
+def _img_tag(img_path: str, max_w: int = 700) -> str:
+    """将图片路径转为 base64 <img> 标签，失败返回原路径 file:// 引用。"""
+    b64 = _img_to_b64(img_path, max_w=max_w)
+    if b64:
+        return f'<br><img src="{b64}" class="evidence-img"><br>'
+    return f'<br><img src="file://{html.escape(img_path)}" class="evidence-img"><br>'
+
+
+def _cell_html(raw: str) -> str:
+    """处理 table cell: 先转义HTML防XSS，再还原公式和图片引用。"""
+    s = html.escape(raw)
+    s = _formula_to_html_spans(s)
+    s = re.sub(r'\[image:\s*(.+?)\]', lambda m: _img_tag(m.group(1).strip()), s)
+    return s
+
+
+def _pipe_table_to_html(pipe_lines: list) -> str:
+    """将 Markdown 管道表格行列表转为 HTML <table>。列宽由内容预计算。"""
+    rows = []
+    for pl in pipe_lines:
+        cells = pl.strip().strip('|').split('|')
+        rows.append([c.strip() for c in cells])
+    data_rows = [rows[0]] + rows[2:]
+    ncols = max(len(r) for r in data_rows) if data_rows else 0
+    if ncols > 0:
+        col_widths_ch = [0.0] * ncols
+        for row in data_rows:
+            for i, cell in enumerate(row):
+                if i >= ncols:
+                    break
+                w = sum(2.0 if ord(c) > 127 else 1.0 for c in cell)
+                if w > col_widths_ch[i]:
+                    col_widths_ch[i] = w
+        total_ch = sum(col_widths_ch)
+        if total_ch > 0:
+            col_pcts = [max(5.0, w / total_ch * 100.0) for w in col_widths_ch]
+            pct_sum = sum(col_pcts)
+            col_pcts = [p / pct_sum * 100.0 for p in col_pcts]
+        else:
+            col_pcts = [100.0 / ncols] * ncols
+        colgroup = '<colgroup>' + ''.join(f'<col style="width:{p:.1f}%">' for p in col_pcts) + '</colgroup>'
+    else:
+        colgroup = ''
+    html_parts = ['<div class="md-table-wrap"><table class="md-table">', colgroup]
+    for ri, row in enumerate(data_rows):
+        tag = 'th' if ri == 0 else 'td'
+        html_parts.append('<tr>')
+        for cell in row:
+            html_parts.append(f'<{tag}>{_cell_html(cell)}</{tag}>')
+        html_parts.append('</tr>')
+    html_parts.append('</table></div>')
+    return ''.join(html_parts)
+
+
+def _format_evidence_text(text: str) -> str:
+    """格式化原始素材文本为 HTML：表格自动转 <table>，公式/图片引用包裹。"""
+    lines = text.split('\n')
+    pipe_lines = [l for l in lines if l.strip().startswith('|')]
+    if len(pipe_lines) >= 3 and '---' in pipe_lines[1]:
+        return _pipe_table_to_html(pipe_lines)
+    result = []
+    for line in lines:
+        escaped = html.escape(line)
+        escaped = re.sub(r'\[image:\s*([^\]]+)\]', lambda m: _img_tag(m.group(1).strip()), escaped)
+        escaped = _formula_to_html_spans(escaped)
+        result.append(escaped)
+    return '\n'.join(result)
+
+
 def search(
     query: str,
     top_k: int = None,
@@ -130,126 +315,11 @@ def search(
         return {"ok": False, "error": f"嵌入查询失败: {e}"}
 
     # 构建过滤条件（分面过滤）
-    qdrant_filter = None
-    if facet_filter:
-        # D7 fix: validate facet_filter keys
-        _VALID_FILTER_KEYS = {"content_type","domain","knowledge_type","tags","temporal_nature","epistemic_status","lifecycle","is_personal","trust_score_min"}
-        _invalid_keys = set(facet_filter.keys()) - _VALID_FILTER_KEYS
-        if _invalid_keys:
-            logger.warning(f"facet_filter invalid keys (ignored): {_invalid_keys}")
-        must_conditions = []
-
-        def _add_match(key, vals):
-            """统一构建 match 条件（单值 or 多值 any）"""
-            must_conditions.append({
-                "key": key,
-                "match": {"value": vals[0]} if len(vals) == 1 else {"any": vals}
-            })
-
-        # 多值匹配字段（content_type / domain / knowledge_type / tags）
-        for key in ("content_type", "domain", "knowledge_type", "tags"):
-            if facet_filter.get(key):
-                _add_match(key, facet_filter[key])
-
-        # 单值匹配字段（temporal_nature / epistemic_status / lifecycle）
-        for key in ("temporal_nature", "epistemic_status", "lifecycle"):
-            if facet_filter.get(key):
-                must_conditions.append({
-                    "key": key,
-                    "match": {"value": facet_filter[key]}
-                })
-
-        # 布尔匹配（is_personal）
-        if "is_personal" in facet_filter:
-            must_conditions.append({
-                "key": "is_personal",
-                "match": {"value": facet_filter["is_personal"]}
-            })
-
-        # 范围匹配（trust_score_min）
-        if facet_filter.get("trust_score_min") is not None:
-            must_conditions.append({
-                "key": "trust_score",
-                "range": {"gte": facet_filter["trust_score_min"]}
-            })
-
-        if must_conditions:
-            qdrant_filter = {"must": must_conditions}
-
-    # ── 生成稀疏查询向量 ──
-    sparse_query = None
-    try:
-        sparse_query = encode_sparse_query(query)
-    except Exception as e:
-        print(f"[Search] 稀疏查询向量生成失败（降级为纯稠密搜索）: {e}")
+    qdrant_filter = _build_qdrant_filter(facet_filter)
 
     # ── 搜索 Qdrant（原生混合查询：稠密 + 稀疏 → RRF 融合）──
     try:
-        # 构建 prefetch 子查询
-        prefetch = []
-        if sparse_query:
-            prefetch.append({
-                "query": {
-                    "indices": sparse_query[0],
-                    "values": sparse_query[1]
-                },
-                "using": "bm25",
-                "limit": top_k * 2,
-            })
-        prefetch.append({
-            "query": query_vec,
-            "using": "dense",   # 命名向量模式：指定使用 "dense" 命名向量
-            "limit": top_k * 2,
-        })
-
-        query_body = {
-            "prefetch": prefetch,
-            "query": {"fusion": "rrf"},
-            "limit": top_k,
-            "with_payload": True,
-        }
-        if qdrant_filter:
-            query_body["filter"] = qdrant_filter
-            # S1.5: ACORN — 提升严格过滤条件下的召回率
-            # enable=true 时，当过滤器选择性低于 max_selectivity，Qdrant 自动启用 ACORN
-            # max_selectivity=0.4 是官方推荐默认值（在准确性和性能间平衡）
-            query_body["params"] = {
-                "acorn": {
-                    "enable": True,
-                    "max_selectivity": 0.4,
-                }
-            }
-
-        # 使用 Qdrant Query API（v1.10+ 原生混合查询）
-        resp = requests.post(
-            f"{QDRANT_URL}/collections/{collection}/points/query",
-            json=query_body,
-            timeout=30
-        )
-        resp.raise_for_status()
-        results = resp.json()["result"]["points"]
-
-        # ── 后过滤：RRF 分数无法直接用 score_threshold，手动过滤 ──
-        if score_threshold and score_threshold > 0:
-            filtered = [r for r in results if r.get("score", 0) >= score_threshold]
-            if filtered:
-                results = filtered
-
-        # ── 重排序（S2）：使用嵌入模型重新打分 ──
-        try:
-            if RERANK_ENABLED:
-                results = rerank_results(
-                    query=query,
-                    results=results,
-                    model=RERANK_MODEL,
-                    top_n=RERANK_TOP_N
-                )
-        except Exception as e:
-            print(f"[Search] 重排序失败: {e}，尝试简单重排序")
-            try:
-                results = rerank_results_simple(query, results, top_n=RERANK_TOP_N)
-            except Exception as e2:
-                print(f"[Search] 简单重排序也失败: {e2}，使用原始排序")
+        results = _query_qdrant_rrf(query, query_vec, top_k, qdrant_filter, score_threshold, collection)
     except Exception as e:
         return {"ok": False, "error": f"搜索失败: {e}"}
 
@@ -803,90 +873,6 @@ def _render_report_html(query: str, synthesis: str, chunks: list, output_dir: st
                 all_images.append(img)
 
     # ── 下层：原始素材（每条 chunk 都展示，按 source+chunk_index 去重） ──
-
-    def _img_tag(img_path: str, max_w: int = 700) -> str:
-        """将图片路径转为 base64 <img> 标签，失败返回原路径 file:// 引用。"""
-        b64 = _img_to_b64(img_path, max_w=max_w)
-        if b64:
-            return f'<br><img src="{b64}" class="evidence-img"><br>'
-        # 降级：file:// 引用（桌面可能还能打开）
-        return f'<br><img src="file://{_html.escape(img_path)}" class="evidence-img"><br>'
-
-
-    def _format_evidence_text(text: str) -> str:
-        """格式化原始素材文本为 HTML：表格自动转 <table>，公式/图片引用包裹。"""
-        lines = text.split('\n')
-
-        # —— 先尝试整个文本是否为管道表格（过滤所有以 | 开头的行） ——
-        pipe_lines = [l for l in lines if l.strip().startswith('|')]
-        if len(pipe_lines) >= 3 and '---' in pipe_lines[1]:
-            # 有效表格：整个文本渲染为一张 HTML table
-            return _pipe_table_to_html(pipe_lines)
-
-        # 非表格文本：逐行处理
-        result = []
-        for line in lines:
-            # 先转义 HTML（防 XSS），再还原公式和图片引用
-            escaped = _html.escape(line)
-            # 还原 [image: ...] → <img> 标签
-            escaped = re.sub(
-                r'\[image:\s*([^\]]+)\]',
-                lambda m: _img_tag(m.group(1).strip()),
-                escaped
-            )
-            # 还原 $...$ 和 $$...$$ → formula <span>
-            escaped = _formula_to_html_spans(escaped)
-            result.append(escaped)
-        return '\n'.join(result)
-
-    def _pipe_table_to_html(pipe_lines: list) -> str:
-        """将 Markdown 管道表格行列表转为 HTML <table>。列宽由内容预计算。"""
-        def _cell_html(raw: str) -> str:
-            """处理 table cell: 先转义HTML防XSS，再还原公式和图片引用。"""
-            s = _html.escape(raw)
-            # 还原公式 $...$ 和 $$...$$
-            s = _formula_to_html_spans(s)
-            # 还原图片引用 [image: ...] → <img>
-            s = re.sub(r'\[image:\s*(.+?)\]', lambda m: _img_tag(m.group(1).strip()), s)
-            return s
-
-        rows = []
-        for pl in pipe_lines:
-            cells = pl.strip().strip('|').split('|')
-            rows.append([c.strip() for c in cells])
-        data_rows = [rows[0]] + rows[2:]  # skip separator row
-
-        # ── 预计算列宽百分比 ──
-        ncols = max(len(r) for r in data_rows) if data_rows else 0
-        if ncols > 0:
-            col_widths_ch = [0.0] * ncols
-            for row in data_rows:
-                for i, cell in enumerate(row):
-                    if i >= ncols:
-                        break
-                    w = sum(2.0 if ord(c) > 127 else 1.0 for c in cell)
-                    if w > col_widths_ch[i]:
-                        col_widths_ch[i] = w
-            total_ch = sum(col_widths_ch)
-            if total_ch > 0:
-                col_pcts = [max(5.0, w / total_ch * 100.0) for w in col_widths_ch]
-                pct_sum = sum(col_pcts)
-                col_pcts = [p / pct_sum * 100.0 for p in col_pcts]
-            else:
-                col_pcts = [100.0 / ncols] * ncols
-            colgroup = '<colgroup>' + ''.join(f'<col style="width:{p:.1f}%">' for p in col_pcts) + '</colgroup>'
-        else:
-            colgroup = ''
-
-        html_parts = ['<div class="md-table-wrap"><table class="md-table">', colgroup]
-        for ri, row in enumerate(data_rows):
-            tag = 'th' if ri == 0 else 'td'
-            html_parts.append('<tr>')
-            for cell in row:
-                html_parts.append(f'<{tag}>{_cell_html(cell)}</{tag}>')
-            html_parts.append('</tr>')
-        html_parts.append('</table></div>')
-        return ''.join(html_parts)
 
     raw_sections = []
     for i, c in enumerate(chunks):

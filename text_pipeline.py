@@ -612,10 +612,6 @@ def extract_text(file_path: str) -> dict:
 
     # ── 图片格式：调用 OCR ──
     if ext in (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"):
-        try:
-            from text_pipeline import ocr_image
-        except ImportError:
-            from text_pipeline import ocr_image
         result = ocr_image(file_path)
         if not result.get("ok"):
             return {"ok": False, "error": result.get("error", "OCR 识别失败")}
