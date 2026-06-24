@@ -122,15 +122,44 @@ def _serve_report(filename: str):
 if __name__ in {"__main__", "__mp_main__"}:
     print(f"[启动] 检查 Qdrant: {kb_query.QDRANT_URL}/collections")
     _qdrant_ok = False
-    try:
-        _test = _r.get(f"{kb_query.QDRANT_URL}/collections", timeout=5)
-        if _test.status_code == 200:
-            print("[启动] ✅ Qdrant 连接正常", flush=True)
-            _qdrant_ok = True
-        else:
-            print(f"[启动] ⚠️ Qdrant 返回异常状态码: {_test.status_code}", flush=True)
-    except Exception as _e:
-        print(f"[启动] ❌ Qdrant 未启动或无法连接: {_e}", flush=True)
+    for _attempt in range(3):
+        try:
+            _test = _r.get(f"{kb_query.QDRANT_URL}/collections", timeout=5)
+            if _test.status_code == 200:
+                print("[启动] ✅ Qdrant 连接正常", flush=True)
+                _qdrant_ok = True
+                break
+            else:
+                print(f"[启动] ⚠️ Qdrant 返回异常状态码: {_test.status_code}", flush=True)
+        except Exception as _e:
+            print(f"[启动] ⚠️ Qdrant 连接失败 (尝试 {_attempt+1}/3): {_e}", flush=True)
+        if not _qdrant_ok and _attempt < 2:
+            print("[启动] 等待 5 秒后重试...", flush=True)
+            import time
+            time.sleep(5)
+
+    if not _qdrant_ok:
+        # 尝试通过 qdrant_helper.ps1 启动 Qdrant
+        import subprocess
+        _ps = "D:\\citrinitas\\scripts\\qdrant_helper.ps1"
+        _proj = "D:\\citrinitas"
+        print("[启动] 尝试启动 Qdrant...", flush=True)
+        try:
+            _r2 = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-File", _ps, "-Action", "detect", "-ProjectDir", _proj],
+                capture_output=True, text=True, timeout=30
+            )
+            _r3 = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-File", _ps, "-Action", "health", "-MaxRetries", "30", "-RetryDelay", "2"],
+                capture_output=True, text=True, timeout=70
+            )
+            if _r3.returncode == 0:
+                print("[启动] ✅ Qdrant 已启动", flush=True)
+                _qdrant_ok = True
+        except Exception as _e2:
+            print(f"[启动] 自动启动 Qdrant 失败: {_e2}", flush=True)
 
     if not _qdrant_ok:
         print("", flush=True)

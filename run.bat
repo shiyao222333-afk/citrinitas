@@ -43,6 +43,11 @@ if %ERRORLEVEL% NEQ 0 (
 )
 echo   OK
 
+REM 1b. 清理残留的 qdrant.exe（防止僵尸进程导致检测误判）
+taskkill /F /IM qdrant.exe 2>NUL
+timeout /t 1 /nobreak >NUL
+
+
 REM ============================================================
 REM  Step 2: 检查 Python 环境 + 依赖完整性 (P1-6)
 REM ============================================================

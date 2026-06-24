@@ -48,8 +48,8 @@ if ($Action -eq "detect") {
         $healthy = $false
         for ($i = 1; $i -le 3; $i++) {
             try {
-                # 用真正的 HTTP 请求检查 API 是否响应（而非仅 TCP 端口）
-                $resp = Invoke-WebRequest -Uri "http://127.0.0.1:6333/health" `
+                # 用 /collections 检查 API 是否真正响应（/health 在部分版本不存在）
+                $resp = Invoke-WebRequest -Uri "http://127.0.0.1:6333/collections" `
                     -Method GET -TimeoutSec 3 -UseBasicParsing `
                     -ErrorAction Stop
                 if ($resp.StatusCode -eq 200) {
