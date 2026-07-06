@@ -13,11 +13,13 @@ from datetime import datetime, timezone
 
 from nicegui import ui
 
-import kb_query
 import classify_pipeline
+from classify_pipeline import route_by_confidence
 import config.classifications as classifications
 from field_cfg import FIELD_DISPLAY_CFG, SOURCE_ICON, PANEL_VALUES
 from panel_funcs import build_result_panel, build_advanced_panel
+from services.ingest_service import ingest
+from text_pipeline import ocr_image
 from utils.file_handler import (
     detect_file_type, extract_text, extract_auto_metadata,
     SIZE_LIMIT_MB, FORMAT_DISPLAY_NAMES,
@@ -96,7 +98,7 @@ def page_ingest():
                     ocr_fname = None
                     ocr_btn_container.clear()
                     try:
-                        ocr_result = await asyncio.to_thread(kb_query.ocr_image, tmp)
+                        ocr_result = await asyncio.to_thread(ocr_image, tmp)
                         if ocr_result.get("ok"):
                             text = ocr_result.get("ocr_text", "")
                             char_count = len(text)
@@ -235,7 +237,7 @@ def page_ingest():
                                 # 入库
                                 needs_review = overall_conf < conf_high
                                 ingest_result = await asyncio.to_thread(
-                                    kb_query.ingest,
+                                    ingest,
                                     text=text,
                                     metadata={
                                         **classification,
@@ -401,7 +403,7 @@ def page_ingest():
             # 置信度路由（三档，阈值从 pipe_cfg.yaml 读取）
             _conf_low = CONFIDENCE_LOW
             _conf_high = CONFIDENCE_HIGH
-            needs_review, dlq = kb_query.route_by_confidence(overall_conf, _conf_low, _conf_high)
+            needs_review, dlq = route_by_confidence(overall_conf, _conf_low, _conf_high)
 
             if dlq:
                 import time
@@ -430,7 +432,7 @@ def page_ingest():
 
             try:
                 result = await asyncio.to_thread(
-                    kb_query.ingest,
+                    ingest,
                     text=ingest_content,
                     metadata=metadata,
                     collection=STATE["active_collection"],

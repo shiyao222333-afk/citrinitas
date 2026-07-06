@@ -27,6 +27,21 @@ from utils.llm_helpers import extract_json_block as _extract_json_block
 from text_pipeline import detect_language
 
 
+def route_by_confidence(overall_conf: float, conf_low: float, conf_high: float) -> tuple:
+    """
+    置信度三档路由。
+    返回 (needs_review, should_dlq)。
+
+    调用方: pages/ingest.py, watcher/processor.py
+    """
+    if overall_conf >= conf_high:
+        return False, False
+    elif overall_conf >= conf_low:
+        return True, False
+    else:
+        return False, True
+
+
 # ═══════════════════════════════════════════
 # 阶段二：标签形成引擎 — 三层管道
 # Layer 1: 📎文件元数据 + 📐规则引擎 并行推断

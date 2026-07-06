@@ -26,10 +26,10 @@ from text_pipeline import (
     ocr_image as _ocr_image,
     extract_text as _extract_text,
 )
-from classify_pipeline import classify_document
+from classify_pipeline import classify_document, route_by_confidence
 from qconst import CONFIDENCE_LOW, CONFIDENCE_HIGH
 from utils.activity_log import log_activity
-import kb_query
+from services.ingest_service import ingest
 
 from watcher.state import (
     _watch_stats, _stats_lock,
@@ -283,7 +283,7 @@ def _do_classify(full_text: str, filepath: str, filename: str,
     metadata["source_path"] = filepath
     metadata["ingestion_source"] = "watch"
 
-    needs_review, should_dlq = kb_query.route_by_confidence(
+    needs_review, should_dlq = route_by_confidence(
         overall_conf, CONFIDENCE_LOW, CONFIDENCE_HIGH)
     if should_dlq:
         _handle_failure(filepath, filename, "classify",
@@ -301,7 +301,7 @@ def _do_ingest(full_text: str, metadata: dict, field_sources: dict,
         return None, False, retry_count
 
     try:
-        ingest_result = kb_query.ingest(
+        ingest_result = ingest(
             text=full_text,
             metadata=metadata,
             collection="athanor_v1",

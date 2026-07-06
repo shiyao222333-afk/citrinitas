@@ -9,9 +9,9 @@
 
 ## 当前状态
 
-- 当前版本：**v1.0.1 ✅**（死代码清理 + 大文件拆分 + run.bat 修复）
+- 当前版本：**v1.1.0 🔮**（架构重构 + 错误日志规范 — 进行中）
 - 活跃 Bug：**0**
-- 下个版本：**v1.1.0** — 错误日志规范（待启动）
+- 下个版本：**v1.2.0** — 闪念笔记
 - Git 状态：main 分支
 
 ---
@@ -29,7 +29,7 @@
 | v0.9.0 | ✅ | 装修 | 知识库综合管理（侧边栏5→4 + 仪表盘 + 浏览 + 批量摄入） |
 | v1.0.0 | ✅ | 交付 | 无 UI 管线 + YAML 配置化 + 桌面一键打包 |
 | v1.0.1 | ✅ | 交付 | 死代码清理 + 大文件拆分 + run.bat 修复 |
-| **v1.1.0** | 🔮 | 交付 | **错误日志规范** — 统一日志格式 + 错误码体系 + 日志查看器 |
+| **v1.1.0** | 🔮 | 交付 | **架构重构 + 错误日志规范** — Service 层解耦 UI/核心 + 统一日志 + 错误码体系 |
 | v1.2.0 | 🔮 | 交付 | 闪念笔记 — fleeting_note 类型 + 快速捕获 + 跳过 LLM 分类 |
 | v1.3.0 | 🔮 | 交付 | 项目间通信 — REST API（ingest/search 端点）+ OpusMagnum 对接 |
 | v1.4.0 | 🔮 | 交付 | 知识关系网 — NetworkX 图谱可视化 + QA 自动生成 + LLM 关系发现 |
@@ -42,15 +42,23 @@
 
 ---
 
-## 下一版本：v1.1.0 错误日志规范
+## 下一版本：v1.1.0 架构重构 + 错误日志规范
 
-**问题**：6 个模块各自 logging，无统一配置；无错误码；异常被吞（多处 `except: pass`）；watcher 日志黑盒。
+**状态**：进行中（架构重构已完成，错误处理进行中）
 
-**方案**：三层结构 — 统一配置(logging.yaml) + 结构化错误格式(error_code/message/context/traceback) + 集中查看 UI(知识中枢新标签)
+**架构重构（已完成）**：
+- ✅ 创建 `services/ingest_service.py`，从 `kb_query.py` 拆出摄入逻辑
+- ✅ 把 `route_by_confidence` 移到 `classify_pipeline.py`
+- ✅ 删除 `kb_query.py` 里的 `get_facet_stats` 重复定义
+- ✅ 重写 `kb_query.py` 为 CLI facade
+- ✅ 更新 UI 层调用方（`pages/ingest.py`, `watcher/processor.py`）
+- 📁 ADR: `docs/adr/ADR-001-introduce-service-layer.md`
 
-**错误码分段**：E001-E099 摄入 / E100-E199 搜索 / E200-E299 守望 / E300-E399 LLM / E400-E499 OCR / E900-E999 基础设施
-
-**实施优先级**：P0 统一 logging.basicConfig + 消灭 except:pass → P1 错误码体系 + UI → P2 日志轮转
+**错误日志规范（进行中）**：
+- 问题：6 个模块各自 logging，无统一配置；无错误码；异常被吞（多处 `except: pass`）；watcher 日志黑盒
+- 方案：三层结构 — 统一配置(logging.yaml) + 结构化错误格式(error_code/message/context/traceback) + 集中查看 UI(知识中枢新标签)
+- 错误码分段：E001-E099 摄入 / E100-E199 搜索 / E200-E299 守望 / E300-E399 LLM / E400-E499 OCR / E900-E999 基础设施
+- 实施优先级：P0 统一 logging.basicConfig + 消灭 except:pass → P1 错误码体系 + UI → P2 日志轮转
 
 **待确认**：① 是否接入外部告警（Server酱/邮件）？ ② 日志放 `local_data/logs/` 还是项目根目录？
 
