@@ -105,7 +105,13 @@ def _delete_inbox_file(filename: str) -> bool:
 def _get_inbox_stats() -> dict:
     """获取收件箱统计信息。"""
     files = _load_inbox_files()
+    states = [f.get("state", "pending") for f in files]
     return {
         "total": len(files),
         "total_size": sum(f["size"] for f in files),
+        "pending": sum(1 for s in states if s == "pending"),
+        "processing": sum(1 for s in states if s == "processing"),
+        "failed": sum(1 for s in states if s == "failed"),
+        "needs_review": sum(1 for s in states if s == "needs_review"),
+        "done": sum(1 for s in states if s == "done"),
     }

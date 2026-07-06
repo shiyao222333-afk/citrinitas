@@ -8,7 +8,7 @@ from nicegui import ui
 import kb_query
 from utils.state import STATE
 from utils.activity_log import log_activity
-def _build_review_tab():
+async def _build_review_tab():
     """待审核标签页 — 列出 needs_review=True 的文档，支持通过/丢弃。"""
     ui.markdown("### 📋 待审核条目")
     ui.markdown("*AI 不太确定这些内容，请确认。*")

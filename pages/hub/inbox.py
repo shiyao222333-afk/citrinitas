@@ -11,7 +11,7 @@ from .helpers import (
 )
 
 
-def _build_inbox_tab():
+async def _build_inbox_tab():
     """收件箱标签页（v1.0.0） — 统一收件箱文件列表 + 状态追踪 + 手动操作。"""
     ui.markdown("### 📥 统一收件箱")
     ui.markdown("*所有通过守望文件夹进入的文件都在这里。状态由 `file_state.jsonl` 追踪。*")

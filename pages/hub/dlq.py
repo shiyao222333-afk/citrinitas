@@ -12,7 +12,7 @@ from utils.activity_log import log_activity
 from .helpers import _load_dlq_files, _delete_dlq_file
 
 
-def _build_dlq_tab():
+async def _build_dlq_tab():
     """死信队列标签页 — 列出置信度 < 低阈值的条目，支持修正/上传/删除。
     v1.0.0: 旧守望 DLQ 已迁移到统一收件箱，此标签页仅显示置信度 DLQ。"""
     ui.markdown("### 🗑️ 死信队列")

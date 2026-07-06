@@ -8,7 +8,7 @@ import kb_query
 from utils.state import STATE
 from utils.ui_shared import set_active_collection
 from utils.activity_log import log_activity
-def _build_browse_tab():
+async def _build_browse_tab():
     """浏览标签页 — 全文搜索 + 分面过滤 + 排序 + 批量操作 + 文档卡片列表。"""
     from config.classifications import CONTENT_TYPE_OPTIONS, TEMPORAL_NATURE_OPTIONS, EPISTEMIC_STATUS_OPTIONS
 

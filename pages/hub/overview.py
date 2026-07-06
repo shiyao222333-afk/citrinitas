@@ -12,7 +12,7 @@ from .helpers import _load_dlq_files, _get_inbox_stats
 # Tab Builders
 # ═══════════════════════════════════════════
 
-def _build_overview_tab():
+async def _build_overview_tab():
     """概览标签页 — 卡片式仪表盘 + 活动时间线 + 快速入口 + 知识库管理。"""
     collections = STATE["collections"]
     current = STATE["active_collection"]
