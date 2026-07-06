@@ -66,6 +66,16 @@ def _build_inbox_tab():
 
     _refresh_inbox()
 
+    # 自动刷新：每 3 秒刷新收件箱，实时反映守望处理进度（无需手动点刷新）
+    if not getattr(_build_inbox_tab, "_timer_started", False):
+        def _auto_refresh():
+            try:
+                _refresh_inbox()
+            except Exception:
+                pass
+        ui.timer(3.0, _auto_refresh)
+        _build_inbox_tab._timer_started = True
+
     with ui.row().classes("gap-2 mt-2"):
         ui.button("🔄 刷新", on_click=_refresh_inbox).props("flat")
         ui.label(f"目录: data/inbox/").classes("text-xs text-gray-500 ml-4")

@@ -419,6 +419,13 @@ def _process_file(filepath: str, cancel_event: threading.Event = None):
                          detail="处理超时取消，由主线程接管")
             return
 
+        # 标记「处理中」，让收件箱 UI 实时显示进度（extract → classify → ingest）
+        _append_state({
+            "file": filename,
+            "state": "processing",
+            "step": "extract",
+        })
+
         ok, should_retry, retry_count = _do_prechecks(filepath, ext, filename, retry_count)
         if not ok:
             if should_retry:
@@ -466,6 +473,11 @@ def _process_file(filepath: str, cancel_event: threading.Event = None):
 
         retention = decide_file_retention(page_analyses)
 
+        _append_state({
+            "file": filename,
+            "state": "processing",
+            "step": "classify",
+        })
         metadata, field_sources, overall_conf, needs_review, should_retry, retry_count = _do_classify(
             full_text, filepath, filename, retry_count, cancel_event)
         if metadata is None:
@@ -475,6 +487,11 @@ def _process_file(filepath: str, cancel_event: threading.Event = None):
             return
 
         metadata["needs_review"] = needs_review
+        _append_state({
+            "file": filename,
+            "state": "processing",
+            "step": "ingest",
+        })
         ingest_result, should_retry, retry_count = _do_ingest(
             full_text, metadata, field_sources, overall_conf,
             filepath, filename, retry_count, cancel_event)
