@@ -5,7 +5,6 @@ v1.0.1: 从 pages/hub.py 拆分为 pages/hub/ 包。
 主入口 page_hub + 辅助函数。
 """
 
-import asyncio
 from datetime import datetime, timezone
 
 from nicegui import ui, context
@@ -26,9 +25,8 @@ from .detail import page_doc_detail  # noqa: F401 — registered via @ui.page de
 
 
 @ui.page("/hub")
-def page_hub():
+async def page_hub():
     """知识库管理 — 侧边栏入口「知识中枢」"""
-    import asyncio as _asyncio
 
     build_left_drawer(active_page="hub")
 
@@ -59,34 +57,34 @@ def page_hub():
         # Tab 1: 概览
         # ══════════════════════════════════════
         with ui.tab_panel(overview_tab):
-            _asyncio.create_task(_build_overview_tab())
+            await _build_overview_tab()
 
         # ══════════════════════════════════════
         # Tab 2: 浏览
         # ══════════════════════════════════════
         with ui.tab_panel(browse_tab):
-            _asyncio.create_task(_build_browse_tab())
+            await _build_browse_tab()
 
         # ══════════════════════════════════════
         # Tab 3: 待审核
         # ══════════════════════════════════════
         with ui.tab_panel(review_tab):
-            _asyncio.create_task(_build_review_tab())
+            await _build_review_tab()
 
         # ══════════════════════════════════════
         # Tab 4: 收件箱（v1.0.0 新增 — 统一收件箱）
         # ══════════════════════════════════════
         with ui.tab_panel(inbox_tab):
-            _asyncio.create_task(_build_inbox_tab())
+            await _build_inbox_tab()
 
         # ══════════════════════════════════════
         # Tab 5: 死信
         # ══════════════════════════════════════
         with ui.tab_panel(dlq_tab):
-            _asyncio.create_task(_build_dlq_tab())
+            await _build_dlq_tab()
 
         # ══════════════════════════════════════
         # Tab 6: 日志查看器（v1.1.0 新增）
         # ══════════════════════════════════════
         with ui.tab_panel(logs_tab):
-            _asyncio.create_task(_build_logs_tab())
+            await _build_logs_tab()

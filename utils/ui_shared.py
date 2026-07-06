@@ -148,9 +148,10 @@ def build_left_drawer(active_page: str = ""):
     _dim_text = f"维度: {_stats.get('dim', '--')}"
 
     # 导航链接样式辅助
-    def _nav_class(page_key: str) -> str:
-        """当前页高亮，其他页悬停高亮。"""
-        if page_key == active_page:
+    def _nav_class(page_key) -> str:
+        """当前页高亮，其他页悬停高亮。page_key 可为 str 或 tuple/list（任一匹配即高亮）。"""
+        keys = page_key if isinstance(page_key, (tuple, list)) else (page_key,)
+        if active_page in keys:
             return "w-full text-left p-2 rounded bg-blue-700 no-underline text-white font-bold"
         return "w-full text-left p-2 rounded hover:bg-blue-700 transition no-underline text-white"
 
@@ -212,8 +213,10 @@ def build_left_drawer(active_page: str = ""):
         with ui.column().classes("w-full px-2 gap-1"):
             ui.link("📥 摄入", "/").classes(_nav_class(""))
             ui.link("🔍 搜索", "/search").classes(_nav_class("search"))
-            ui.link("📚 知识库管理", "/hub").classes(_nav_class("hub"))
-            ui.link("📄 文档管理", "/manage").classes(_nav_class("manage"))
+            # 知识库管理（父级页面；进入其子页面时父项也高亮）
+            ui.link("📚 知识库管理", "/hub").classes(_nav_class(("hub", "manage")))
+            # 文档管理（知识库管理的子页面，缩进展示）
+            ui.link("↳ 📄 文档管理", "/manage").classes(_nav_class("manage") + " q-ml-md")
             ui.link("⚙️ 设置", "/config").classes(_nav_class("config"))
 
         ui.separator()
