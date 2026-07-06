@@ -16,6 +16,8 @@ qdrant/
 # 运行时锁文件
 data/.watch_v2.lock
 data/.watch_v2_migrated
+data/.watch.lock
+data/.watch_migrated
 
 # Python
 __pycache__/
