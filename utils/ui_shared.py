@@ -8,8 +8,9 @@ main.py 和 pages/*.py 都从此模块导入共享函数。
 import asyncio
 from nicegui import ui, app
 import requests
-import kb_query
 import threading
+from qconst import QDRANT_URL, DEFAULT_COLLECTION
+from qdrant_client import list_collections, get_embed_models
 from utils.state import STATE
 
 # ═══════════════════════════════════════════
@@ -30,7 +31,7 @@ EMBED_PRESETS = {
 def refresh_system_state():
     """刷新全局状态：Qdrant 连接、集合列表、统计信息（所有请求带 timeout）。"""
     try:
-        col_data = kb_query.list_collections()
+        col_data = list_collections()
         STATE["collections"] = [c["name"] for c in col_data.get("collections", [])] if col_data.get("ok") else []
         STATE["qdrant_online"] = col_data.get("ok", False)
 
@@ -39,7 +40,7 @@ def refresh_system_state():
 
         if STATE["qdrant_online"]:
             try:
-                url = f"{kb_query.QDRANT_URL}/collections/{STATE['active_collection']}"
+                url = f"{QDRANT_URL}/collections/{STATE['active_collection']}"
                 resp = requests.get(url, timeout=10)
                 if resp.status_code == 200:
                     data = resp.json().get("result", {})
@@ -67,7 +68,7 @@ def refresh_system_state():
         STATE["stats"] = {}
 
     try:
-        STATE["embed_models"] = kb_query.get_embed_models()
+        STATE["embed_models"] = get_embed_models()
     except Exception:
         STATE["embed_models"] = []
 
@@ -164,7 +165,7 @@ def build_left_drawer(active_page: str = ""):
         with ui.column().classes("w-full px-4"):
             ui.markdown("### 📚 当前知识库")
             collection_select = ui.select(
-                options=STATE["collections"] if STATE["collections"] else [kb_query.DEFAULT_COLLECTION],
+                options=STATE["collections"] if STATE["collections"] else [DEFAULT_COLLECTION],
                 value=STATE["active_collection"],
                 on_change=lambda e: set_active_collection(e.value),
             ).classes("w-full").props("dense outlined dark")

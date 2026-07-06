@@ -30,7 +30,9 @@ from services.ingest_service import ingest, ingest_batch
 from search_engine import search, answer
 from search_engine.facets import get_facet_stats
 from classify_pipeline import route_by_confidence
-from qconst import SEARCH_TOP_K, SEARCH_SCORE_THRESHOLD, TABLE_SPLIT_THRESHOLD, DEFAULT_COLLECTION, EMBED_MODEL
+from doc_manager import update_metadata, list_documents, get_document, delete_document
+from qdrant_client import create_collection, clear_collection
+from qconst import SEARCH_TOP_K, SEARCH_SCORE_THRESHOLD, TABLE_SPLIT_THRESHOLD, DEFAULT_COLLECTION, EMBED_MODEL, QDRANT_URL
 
 __version__ = "1.1.0"
 

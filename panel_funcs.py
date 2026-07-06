@@ -5,7 +5,7 @@
 
 from nicegui import ui
 from field_cfg import FIELD_DISPLAY_CFG, SOURCE_ICON, PANEL_VALUES
-import kb_query
+from classify_pipeline import REQUIRED_FACET_FIELDS
 
 # 全局：当前 AI 分析结果 + 容器引用（供编辑后刷新用）
 _CURRENT_ANNOTATED = None
@@ -84,7 +84,7 @@ def _render_field_card(field_name: str, container):
                 display_val = _format_field_value(field_name, val, cfg)
                 ui.html(display_val).classes("flex-1 text-sm")
                 ui.badge(icon, color={"file":"blue","rule":"teal","llm":"purple","user":"amber","default":"grey","system":"grey"}.get(src, "grey")).props("outline dense").classes("text-xs")
-                if field_name in kb_query.REQUIRED_FACET_FIELDS:
+                if field_name in REQUIRED_FACET_FIELDS:
                     bar_color = "green" if conf >= 0.75 else "orange" if conf >= 0.40 else "red"
                     ui.linear_progress(value=conf, color=bar_color).classes("w-16 h-2")
                 if 0 < conf < 0.40:

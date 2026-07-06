@@ -9,6 +9,7 @@ import os
 from nicegui import ui
 
 import kb_query
+from qconst import EMBED_MODEL, QDRANT_URL
 from utils.state import STATE
 from utils.ui_shared import build_left_drawer, EMBED_PRESETS
 
@@ -118,7 +119,7 @@ def page_config():
 
                 current_embed = ui.input(
                     label="当前嵌入模型",
-                    value=os.environ.get("KB_EMBED_MODEL", kb_query.EMBED_MODEL),
+                    value=os.environ.get("KB_EMBED_MODEL", EMBED_MODEL),
                 ).classes("w-full")
 
                 def save_embed():
@@ -215,4 +216,4 @@ def page_config():
                 ui.markdown("### 版本信息")
                 ui.label(f"Citrinitas: v{kb_query.__version__}")
                 ui.label("NiceGUI: 3.13.0")
-                ui.label(f"Qdrant: {kb_query.QDRANT_URL}")
+                ui.label(f"Qdrant: {QDRANT_URL}")
