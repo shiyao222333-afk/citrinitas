@@ -1,4 +1,7 @@
-import os, sys, time, threading
+import os
+import sys
+import time
+import threading
 from nicegui import ui, app
 import requests as _r
 

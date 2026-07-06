@@ -175,7 +175,7 @@ def _step_embed(state: dict) -> dict:
 
 def _step_generate_sparse_vectors(state: dict) -> dict:
     """Step 6.5: 为每个块生成稀疏向量（BM25）"""
-    chunks = state['chunks']
+    chunks = state["chunks"]
     sparse_vectors = []
 
     try:
@@ -183,13 +183,13 @@ def _step_generate_sparse_vectors(state: dict) -> dict:
             indices, values = encode_sparse(chunk, update_vocab=True)
             sparse_vectors.append((indices, values))
     except Exception as e:
-        return {'ok': False, 'error': f'稀疏向量生成失败: {e}'}
+        return {"ok": False, "error": f"稀疏向量生成失败: {e}"}
 
     if not sparse_vectors:
-        return {'ok': False, 'error': '所有块稀疏向量生成失败'}
+        return {"ok": False, "error": "所有块稀疏向量生成失败"}
 
-    state['sparse_vectors'] = sparse_vectors
-    return {'ok': True}
+    state["sparse_vectors"] = sparse_vectors
+    return {"ok": True}
 
 
 def _step_pre_store_hooks(state: dict) -> dict:

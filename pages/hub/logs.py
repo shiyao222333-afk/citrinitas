@@ -11,7 +11,7 @@ v1.1.0 新增：统一日志查看 UI。
 """
 import os
 from datetime import datetime, timedelta
-from collections import Counter
+from collections import Counter, deque
 
 from nicegui import ui
 
@@ -31,7 +31,7 @@ def _parse_log_file(log_path: str, max_lines: int = 500) -> list:
         return records
 
     with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-        lines = f.readlines()[-max_lines:]  # 只读最后 N 行
+        lines = deque(f, maxlen=max_lines)  # 高效读取最后 N 行，避免全文件加载
 
     for line in lines:
         line = line.strip()
