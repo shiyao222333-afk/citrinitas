@@ -63,7 +63,7 @@ class WatchHandler(FileSystemEventHandler):
         filepath = event.src_path
         filename = os.path.basename(filepath)
 
-        if _is_temp_file(filename):
+        if _is_temp_file(filename) or filename.startswith("."):
             with _stats_lock: _watch_stats["skipped"] += 1
             return
 
@@ -86,7 +86,7 @@ class WatchHandler(FileSystemEventHandler):
             return
         filepath = event.dest_path
         filename = os.path.basename(filepath)
-        if _is_temp_file(filename):
+        if _is_temp_file(filename) or filename.startswith("."):
             with _stats_lock: _watch_stats["skipped"] += 1
             return
         try:
@@ -143,7 +143,7 @@ def _processing_loop(queue: Queue, stop_event: threading.Event):
             if not os.path.isfile(filepath):
                 continue
 
-            if _is_temp_file(filename):
+            if _is_temp_file(filename) or filename.startswith("."):
                 with _stats_lock: _watch_stats["skipped"] += 1
                 continue
 
@@ -213,7 +213,7 @@ def _scan_existing_files(queue: Queue):
     files = []
     for filename in os.listdir(INBOX_DIR):
         filepath = os.path.join(INBOX_DIR, filename)
-        if os.path.isfile(filepath) and not _is_temp_file(filename):
+        if os.path.isfile(filepath) and not _is_temp_file(filename) and not filename.startswith("."):
             files.append(filepath)
 
     for fp in sorted(files):
@@ -240,7 +240,7 @@ def _rescue_orphaned_files(queue: Queue):
         filepath = os.path.join(INBOX_DIR, filename)
         if not os.path.isfile(filepath):
             continue
-        if _is_temp_file(filename):
+        if _is_temp_file(filename) or filename.startswith("."):
             continue
         entry = state.get(filename)
         if entry and entry.get("state") in ("failed", "needs_review", "done"):

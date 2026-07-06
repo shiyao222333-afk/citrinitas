@@ -125,7 +125,7 @@ def _handle_failure(filepath: str, filename: str, step: str, error_msg: str, ret
       - "skip": 已跳过
     """
     # 延迟导入避免循环依赖（此模块由 __init__.py 在 globals 定义之后导入）
-    from watcher import _append_state, _watch_stats, _stats_lock
+    from watcher.state import _append_state, _watch_stats, _stats_lock
 
     failure_type = _classify_failure(step, error_msg)
     strategy = _get_strategy(failure_type)

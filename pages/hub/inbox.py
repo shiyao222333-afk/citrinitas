@@ -160,7 +160,7 @@ def _build_inbox_card(item: dict, on_refresh):
                     else:
                         ui.notify(f"❌ {fn} 重试失败（守望进程可能未运行）", type="negative")
                     on_refresh()
-                ui.button("🔄 重试", on_click=lambda: asyncio.ensure_future(_retry())).props("color=blue flat size=sm")
+                ui.button("🔄 重试", on_click=_retry).props("color=blue flat size=sm")
 
             # 删除按钮（所有状态均可删除）
             del_dialog = ui.dialog()
