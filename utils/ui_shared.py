@@ -122,8 +122,13 @@ def _status_tick():
     threading.Thread(target=_do_refresh, daemon=True).start()
 
 
-def build_left_drawer():
-    """构建左侧导航抽屉（所有页面共用）。"""
+def build_left_drawer(active_page: str = ""):
+    """构建左侧导航抽屉（所有页面共用）。
+
+    Args:
+        active_page: 当前页面标识，用于高亮导航链接。
+                    取值：""（摄入）、"search"、"hub"、"config"
+    """
     global _GLOBAL_TIMER, _STATUS_WIDGETS
 
     # 保存事件循环引用（供 _status_tick 的后台线程使用）
@@ -140,6 +145,13 @@ def build_left_drawer():
     _stats = STATE.get("stats", {})
     _points_text = f"文档块: {_stats.get('points', '--')}"
     _dim_text = f"维度: {_stats.get('dim', '--')}"
+
+    # 导航链接样式辅助
+    def _nav_class(page_key: str) -> str:
+        """当前页高亮，其他页悬停高亮。"""
+        if page_key == active_page:
+            return "w-full text-left p-2 rounded bg-blue-700 no-underline text-white font-bold"
+        return "w-full text-left p-2 rounded hover:bg-blue-700 transition no-underline text-white"
 
     with ui.left_drawer(value=True, fixed=False, bordered=True).classes("bg-gray-900 text-white") as drawer:
         with ui.column().classes("w-full items-center p-4"):
@@ -195,20 +207,13 @@ def build_left_drawer():
 
         ui.separator()
 
-        # 导航链接
+        # 导航链接（支持 active_page 高亮）
         with ui.column().classes("w-full px-2 gap-1"):
-            ui.link("📥 摄入", "/").classes(
-                "w-full text-left p-2 rounded hover:bg-blue-700 transition no-underline text-white"
-            )
-            ui.link("🔍 搜索", "/search").classes(
-                "w-full text-left p-2 rounded hover:bg-blue-700 transition no-underline text-white"
-            )
-            ui.link("📚 知识库管理", "/hub").classes(
-                "w-full text-left p-2 rounded hover:bg-blue-700 transition no-underline text-white"
-            )
-            ui.link("⚙️ 设置", "/config").classes(
-                "w-full text-left p-2 rounded hover:bg-blue-700 transition no-underline text-white"
-            )
+            ui.link("📥 摄入", "/").classes(_nav_class(""))
+            ui.link("🔍 搜索", "/search").classes(_nav_class("search"))
+            ui.link("📚 知识库管理", "/hub").classes(_nav_class("hub"))
+            ui.link("📄 文档管理", "/manage").classes(_nav_class("manage"))
+            ui.link("⚙️ 设置", "/config").classes(_nav_class("config"))
 
         ui.separator()
         with ui.column().classes("w-full px-4"):

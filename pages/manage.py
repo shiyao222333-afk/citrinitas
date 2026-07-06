@@ -19,7 +19,7 @@ from utils.ui_shared import build_left_drawer
 def page_manage():
     """文档管理页面（/manage）—— 列表、查看、删除"""
 
-    build_left_drawer()
+    build_left_drawer(active_page="manage")
 
     with ui.column().classes("w-full p-6"):
         ui.markdown("# 📄 文档管理")

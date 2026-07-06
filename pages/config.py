@@ -45,7 +45,7 @@ def _save_env(kv: dict):
 def page_config():
     """引擎配置页面（/config）—— 配置底层引擎参数"""
 
-    build_left_drawer()
+    build_left_drawer(active_page="config")
 
     with ui.column().classes("w-full p-6"):
         ui.markdown("# ⚙️ 引擎配置")

@@ -15,7 +15,7 @@ from utils.activity_log import log_activity
 def page_doc_detail(doc_uid: str):
     """文档详情页 — 28 字段完整展示 + 分块列表 + 来源追踪。"""
 
-    build_left_drawer()
+    build_left_drawer(active_page="hub")
 
     with ui.column().classes("w-full p-6"):
         # 返回按钮

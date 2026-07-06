@@ -21,7 +21,7 @@ from utils.ui_shared import build_left_drawer
 def page_search():
     """智能检索页面（/search）—— 语义搜索 + AI 问答"""
 
-    build_left_drawer()
+    build_left_drawer(active_page="search")
 
     with ui.column().classes("w-full p-6"):
         ui.markdown("# 💬 智能检索")

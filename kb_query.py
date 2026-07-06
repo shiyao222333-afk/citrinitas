@@ -93,7 +93,7 @@ from classify_pipeline import (
 )
 from ingest_pipeline import build_payloads
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 
 # ═══════════════════════════════════════════
