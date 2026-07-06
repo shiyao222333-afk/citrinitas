@@ -58,10 +58,11 @@ flowchart TB
     N4_OCR -.->|异常| INBOX_FAILED
     N4_DOC -.->|异常| INBOX_FAILED
 
-    C3{编码?} -->|可解码| N5
+    C3{编码?} -->|可解码| N_PRE
     C3 -->|失败| W2[⚠️ chardet推测]
 
-    W2 --> N5
+    W2 --> N_PRE
+    N_PRE([预处理<br/>纠错·翻译·去广告]) --> N5
     N5{≤5000字?} -->|是| C_DUP
     N5 -->|否| W3[⚠️ 截断]
 
@@ -81,11 +82,16 @@ flowchart TB
     N_PAGES --> DELETE([🗑 删除原文件<br/>纯文本已入库])
 
     N7 -->|正常| DONE([✅ 完成])
+    N7 -->|书籍/大文件(未来)| N_BOOK([📚 书库归档<br/>归一化源+位置指针])
+    N7 -.->|大文件续跑(未来)| N_RESUME([⏸ 断点续存])
 
     style N7 fill:#d4edda,stroke:#28a745
     style INBOX_FAILED fill:#fff3cd,stroke:#f0ad4e
     style DL_CONF fill:#f8d7da,stroke:#dc3545
     style KEEP fill:#d1ecf1,stroke:#0c5460
+    style N_PRE fill:#e2e3e5,stroke:#6c757d
+    style N_BOOK fill:#d1ecf1,stroke:#0c5460
+    style N_RESUME fill:#fff3cd,stroke:#f0ad4e
 ```
 
 ### 摄入节点定义
@@ -117,6 +123,9 @@ flowchart TB
 | INBOX_FAILED | 📥 收件箱失败 | 处理失败的文件 | 留在 inbox/ + state 条目 | file_state.jsonl 记录 state:failed/needs_review/retry; 15故障×5策略(自动重试/等待基础设施/DLQ/审核/跳过) | Task 5 |
 | KEEP | 📥 保留原文件 | 含非文本元素的文件 | 保留在 inbox/ | WLNK:任一页不可删→保留整个文件 | Task 4 |
 | DELETE | 🗑 删除原文件 | 全部页面纯文本 | 删除原文件 | WLNK:全部页面可删→内容已入库，可删原文件 | Task 4 |
+| N_PRE | 预处理 | 解码后全文 | 清洗后文本 | 自动纠错 + 统一语言翻译 + 去除广告/抓取残留（v1.5.0 规划） | 未来 |
+| N_BOOK | 📚 书库归档 | 书籍类已存储内容 | 归一化源文件+位置指针+书目录 | 录入前归一化为统一格式，每块记章节/段落指针，搜索按源聚成书/丛书（v1.2.0 规划） | 未来 |
+| N_RESUME | ⏸ 断点续存 | 大文件处理中状态 | 最后完成块+续跑 | 源持久化+增量写+记块，关机重启可续（v1.2.x 规划，文字小说优先） | 未来 |
 
 ### 摄入连线
 
@@ -148,6 +157,10 @@ flowchart TB
 | N_PAGES→KEEP | 原文件保留 | WLNK:任一页不可删 |
 | N_PAGES→DELETE | 删除原文件 | WLNK:全部页面可删 |
 | N7→DONE | — | 非守望来源正常完成 |
+| C3→N_PRE | 解码后全文 | 编码通过 |
+| N_PRE→N5 | 清洗后全文 | 预处理完成 |
+| N7→N_BOOK | 书籍类已存储内容 | 书籍来源(未来) |
+| N7→N_RESUME | 大文件处理中状态 | 大文件续跑(未来) |
 
 ---
 
