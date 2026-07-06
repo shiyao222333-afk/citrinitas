@@ -182,8 +182,10 @@ def page_ingest():
                             else:
                                 text = str(extract_result)
                             if len(text) > 5000:
-                                ui.notify(f"文本较长 ({len(text)} 字)，已截取前 5000 字发送给 AI 分析", type="warning")
-                                text = text[:5000]
+                                ui.notify(
+                                    f"文本较长 ({len(text)} 字)，AI 分类仅取前 5000 字分析，但全文会完整入库",
+                                    type="info",
+                                )
 
                         # 提取自动元数据（后台线程执行）
                         auto_meta_result = await asyncio.to_thread(extract_auto_metadata, temp_path, file_type)
