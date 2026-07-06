@@ -52,6 +52,10 @@ NUL
 # 守望文件夹运行时状态
 data/file_state.jsonl
 
+# BM25 词典（运行时生成，随摄入增长；已从 Git 追踪中移除，仅留本地）
+sparse_vocab.json
+sparse_vocab.json.tmp
+
 # 守望文件夹（v2）— 摄入文件不提交，仅保留 .gitkeep
 data/inbox/*
 !data/inbox/.gitkeep

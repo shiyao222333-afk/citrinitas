@@ -33,7 +33,7 @@ from text_pipeline import (
     _embed, _chunk_text, _text_hash, _extract_images, _ensure_images_dir,
     detect_encoding, extract_text,
 )
-from sparse_encoder import encode_sparse
+from sparse_encoder import encode_sparse, flush_vocab
 from ingest_pipeline import build_payloads
 from utils.activity_log import log_activity
 
@@ -192,7 +192,7 @@ def _step_generate_sparse_vectors(state: dict) -> dict:
 
     try:
         for chunk in chunks:
-            indices, values = encode_sparse(chunk, update_vocab=True)
+            indices, values = encode_sparse(chunk, update_vocab=False)
             sparse_vectors.append((indices, values))
     except Exception as e:
         return {"ok": False, "error": f"稀疏向量生成失败: {e}"}
@@ -200,6 +200,7 @@ def _step_generate_sparse_vectors(state: dict) -> dict:
     if not sparse_vectors:
         return {"ok": False, "error": "所有块稀疏向量生成失败"}
 
+    flush_vocab()  # 批量摄入结束后一次性落盘（避免每块重写整个词典文件）
     state["sparse_vectors"] = sparse_vectors
     return {"ok": True}
 
