@@ -7,7 +7,10 @@ Search Engine 包 — 语义搜索 / LLM 问答合成 / 分面统计
 """
 
 from .core import search, _build_qdrant_filter, _query_qdrant_rrf
-from .answer import answer, OUTPUT_DIR, _call_llm_api, _renumber_citations, _build_synthesis_prompt, _expand_chunks
+from .answer import (
+    answer, OUTPUT_DIR, _call_llm_api, _renumber_citations, _build_synthesis_prompt, _expand_chunks,
+    LLM_BASE_URL, LLM_API_KEY, LLM_MODEL,
+)
 from .utils import _sanitize_html, _chunk_has_table, _chunk_is_garbled, _dedup_chunks
 from .facets import get_facet_stats
 
@@ -17,6 +20,9 @@ __all__ = [
     "answer",
     "get_facet_stats",
     "OUTPUT_DIR",
+    "LLM_BASE_URL",
+    "LLM_API_KEY",
+    "LLM_MODEL",
     # 内部辅助（测试/调试用）
     "_build_qdrant_filter",
     "_query_qdrant_rrf",
