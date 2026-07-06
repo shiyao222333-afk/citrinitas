@@ -5,6 +5,11 @@ import requests as _r
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_FILE = os.path.join(PROJECT_DIR, ".env")
 
+# ── 日志初始化（最早执行）───────────────────────────────────────────────────────
+from utils.logging_config import setup_logging
+setup_logging()  # 配置控制台 + 文件日志（local_data/logs/）
+logger = __import__("logging").getLogger(__name__)
+
 # ── .env 加载 ─────────────────────────────
 if os.path.exists(ENV_FILE):
     with open(ENV_FILE, "r", encoding="utf-8") as f:
@@ -50,26 +55,26 @@ def _save_env(key: str, val: str):
 @app.on_startup
 def startup():
     """启动回调：只做轻量操作，不阻塞事件循环。"""
-    print("[启动] startup 回调开始（事件循环线程）", flush=True)
+    logger.info("startup 回调开始（事件循环线程）")
     set_main_loop()
     threading.Thread(target=_auto_shutdown, daemon=True).start()
     # 启动守望文件夹 v2
     try:
         watcher.start_watcher()
-        print("[启动] 守望文件夹 v2 已启动", flush=True)
+        logger.info("守望文件夹 v2 已启动")
     except Exception as e:
-        print(f"[启动] ⚠️ 守望文件夹 v2 启动失败: {e}", flush=True)
-    print(f"[启动] startup 回调完成 — STATE 已有 stats={STATE.get('stats')}", flush=True)
+        logger.error(f"守望文件夹 v2 启动失败: {e}")
+    logger.info(f"startup 回调完成 — STATE 已有 stats={STATE.get('stats')}")
 
 
 @app.on_shutdown
 def shutdown():
     """关闭回调：停止守望文件夹。"""
-    print("[关闭] 停止守望文件夹 v2…", flush=True)
+    logger.info("停止守望文件夹 v2…")
     try:
         watcher.stop_watcher()
     except Exception as e:
-        print(f"[关闭] 守望文件夹 v2 停止异常: {e}", flush=True)
+        logger.error(f"守望文件夹 v2 停止异常: {e}")
 
 def _auto_shutdown():
     CHECK = 3
@@ -85,12 +90,12 @@ def _auto_shutdown():
         except Exception:
             idle += 1
             if idle >= IDLE_MAX:
-                print("\n[Citrinitas] 浏览器已关闭，自动退出。")
+                logger.info("浏览器已关闭，自动退出。")
                 # 先优雅停止守望文件夹，释放锁和资源
                 try:
                     watcher.stop_watcher()
                 except Exception as e:
-                    print(f"[Citrinitas] 守望停止异常: {e}")
+                    logger.warning(f"守望停止异常: {e}")
                 os._exit(0)
 
 
@@ -126,15 +131,15 @@ if __name__ in {"__main__", "__mp_main__"}:
         try:
             _test = _r.get(f"{kb_query.QDRANT_URL}/collections", timeout=5)
             if _test.status_code == 200:
-                print("[启动] ✅ Qdrant 连接正常", flush=True)
+                logger.info("✅ Qdrant 连接正常")
                 _qdrant_ok = True
                 break
             else:
-                print(f"[启动] ⚠️ Qdrant 返回异常状态码: {_test.status_code}", flush=True)
+                logger.warning(f"Qdrant 返回异常状态码: {_test.status_code}")
         except Exception as _e:
-            print(f"[启动] ⚠️ Qdrant 连接失败 (尝试 {_attempt+1}/3): {_e}", flush=True)
+            logger.warning(f"Qdrant 连接失败 (尝试 {_attempt+1}/3): {_e}")
         if not _qdrant_ok and _attempt < 2:
-            print("[启动] 等待 5 秒后重试...", flush=True)
+            logger.info("等待 5 秒后重试...")
             import time
             time.sleep(5)
 
@@ -142,7 +147,7 @@ if __name__ in {"__main__", "__mp_main__"}:
         # 尝试通过 qdrant_helper.ps1 启动 Qdrant（真正启动，不只是检测）
         import subprocess
         _ps = os.path.join(PROJECT_DIR, "scripts", "qdrant_helper.ps1")
-        print("[启动] 尝试启动 Qdrant...", flush=True)
+        logger.info("尝试启动 Qdrant...")
         try:
             _r = subprocess.run(
                 ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -151,44 +156,30 @@ if __name__ in {"__main__", "__mp_main__"}:
                 capture_output=True, text=True, timeout=80
             )
             if _r.returncode == 0:
-                print("[启动] ✅ Qdrant 已启动", flush=True)
+                logger.info("✅ Qdrant 已启动")
                 _qdrant_ok = True
             else:
-                print(f"[启动] Qdrant 启动失败，返回码: {_r.returncode}", flush=True)
+                logger.error(f"Qdrant 启动失败，返回码: {_r.returncode}")
                 if _r.stdout:
-                    print(f"[启动] 输出: {_r.stdout[-500:]}", flush=True)
+                    logger.debug(f"Qdrant 启动输出: {_r.stdout[-500:]}")
         except Exception as _e2:
-            print(f"[启动] 自动启动 Qdrant 失败: {_e2}", flush=True)
+            logger.error(f"自动启动 Qdrant 失败: {_e2}")
 
     if not _qdrant_ok:
-        print("", flush=True)
-        print("=" * 60, flush=True)
-        print("  ❌ 无法连接到 Qdrant，Citrinitas 不能启动。", flush=True)
-        print("", flush=True)
-        print("  请确保 Qdrant 正在运行：", flush=True)
-        print("    1. 手动检查：打开 http://127.0.0.1:6333 看是否响应", flush=True)
-        print("    2. 或重新运行 run.bat（它会自动启动 Qdrant）", flush=True)
-        print("=" * 60, flush=True)
-        print("", flush=True)
+        logger.critical("无法连接到 Qdrant，Citrinitas 不能启动。")
+        logger.critical("  请确保 Qdrant 正在运行：")
+        logger.critical("    1. 手动检查：打开 http://127.0.0.1:6333 看是否响应")
+        logger.critical("    2. 或重新运行 run.bat（它会自动启动 Qdrant）")
         sys.exit(1)
 
     # 在事件循环启动前刷新状态（阻塞主线程没问题，此时事件循环还没启动）
-    print("[启动] 刷新系统状态（ui.run 前）…", flush=True)
+    logger.info("刷新系统状态（ui.run 前）...")
     refresh_system_state()
-    print(f"[启动] 状态刷新完成 — stats={STATE.get('stats')}", flush=True)
+    logger.info(f"状态刷新完成 — stats={STATE.get('stats')}")
 
-    print("", flush=True)
-    print("*" * 61, flush=True)
-    print("*" + " " * 59 + "*", flush=True)
-    print("*    ✅  Citrinitas 服务启动成功！                           *", flush=True)
-    print("*" + " " * 59 + "*", flush=True)
-    print("*    📍 Web UI:  http://127.0.0.1:8080                      *", flush=True)
-    print("*    📍 Qdrant:  http://127.0.0.1:6333                      *", flush=True)
-    print("*" + " " * 59 + "*", flush=True)
-    print("*    浏览器将会自动打开（如未打开请手动访问上方地址）           *", flush=True)
-    print("*" + " " * 59 + "*", flush=True)
-    print("*" * 61, flush=True)
-    print("", flush=True)
+    logger.info("Citrinitas 服务启动成功！")
+    logger.info("  📍 Web UI:  http://127.0.0.1:8080")
+    logger.info("  📍 Qdrant:  http://127.0.0.1:6333")
 
     # 备用浏览器开启（NiceGUI 的 webbrowser.open 在 Windows 下可能静默失败）
     def _fallback_browser():
@@ -197,6 +188,7 @@ if __name__ in {"__main__", "__mp_main__"}:
             try:
                 _r.get("http://127.0.0.1:8080", timeout=1)
                 os.startfile("http://127.0.0.1:8080")
+                logger.info("浏览器已自动打开")
                 break
             except Exception:
                 continue

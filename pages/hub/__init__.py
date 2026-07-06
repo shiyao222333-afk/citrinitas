@@ -21,6 +21,7 @@ from .browse import _build_browse_tab
 from .review import _build_review_tab
 from .inbox import _build_inbox_tab
 from .dlq import _build_dlq_tab
+from .logs import _build_logs_tab
 from .detail import page_doc_detail  # noqa: F401 — registered via @ui.page decorator
 
 
@@ -38,13 +39,14 @@ def page_hub():
     # ── 系统状态 ──
     refresh_system_state(force=False)
 
-    # ── 5 个标签页 ──
+    # ── 6 个标签页 ────────────────────────────────────────────────────────────
     with ui.tabs().classes("w-full") as tabs:
         overview_tab = ui.tab("📊 概览")
         browse_tab = ui.tab("📋 浏览")
         review_tab = ui.tab("📝 待审核")
         inbox_tab = ui.tab("📥 收件箱")
         dlq_tab = ui.tab("🗑️ 死信")
+        logs_tab = ui.tab("📋 日志")
 
         # 死信徽章
         dlq_count = len(_load_dlq_files())
@@ -82,3 +84,9 @@ def page_hub():
         # ══════════════════════════════════════
         with ui.tab_panel(dlq_tab):
             _asyncio.create_task(_build_dlq_tab())
+
+        # ══════════════════════════════════════
+        # Tab 6: 日志查看器（v1.1.0 新增）
+        # ══════════════════════════════════════
+        with ui.tab_panel(logs_tab):
+            _asyncio.create_task(_build_logs_tab())
