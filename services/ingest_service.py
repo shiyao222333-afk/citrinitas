@@ -149,14 +149,26 @@ def _step_chunk(state: dict) -> dict:
 
 
 def _step_embed(state: dict) -> dict:
-    """Step 6: 为每个块生成嵌入向量"""
+    """Step 6: 为每个块生成嵌入向量（含重试机制）"""
     chunks = state["chunks"]
     model = state.get("model", EMBED_MODEL)
+    max_retries = 3
+    retry_delay = 5  # 秒
 
-    try:
-        vectors = _embed(chunks, model=model)
-    except Exception as e:
-        return {"ok": False, "error": f"嵌入失败: {e}"}
+    vectors = []
+    for attempt in range(max_retries):
+        try:
+            vectors = _embed(chunks, model=model)
+            break  # 成功，退出重试循环
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(
+                    f"嵌入失败（尝试 {attempt+1}/{max_retries}）: {e}，"
+                    f"{retry_delay}秒后重试..."
+                )
+                time.sleep(retry_delay)
+            else:
+                return {"ok": False, "error": f"嵌入失败（已重试{max_retries}次）: {e}"}
 
     if not vectors:
         return {"ok": False, "error": "所有块嵌入失败"}
@@ -195,11 +207,18 @@ def _step_generate_sparse_vectors(state: dict) -> dict:
 def _step_pre_store_hooks(state: dict) -> dict:
     """Step 7: 执行预存储钩子（Nigredo 等外部程序在此介入）"""
     from config.hooks import get_hooks
+    hook_failures = []
     for hook in get_hooks():
         try:
-            state = hook(state)
+            result = hook(state)
+            if result is not None:
+                state = result
         except Exception as e:
-            logger.warning(f"预存储钩子 {hook.__name__} 执行失败: {e}")
+            msg = f"预存储钩子 {getattr(hook, '__name__', str(hook))} 执行失败: {e}"
+            logger.warning(msg)
+            hook_failures.append(msg)
+    if hook_failures:
+        state["hook_failures"] = hook_failures
     return {"ok": True}
 
 
@@ -379,6 +398,7 @@ def ingest(
         "doc_id": state["doc_id"],
         "content_hash": state.get("content_hash", ""),
         "images": state["valid_images"],
+        "hook_failures": state.get("hook_failures", []),
     }
 
 

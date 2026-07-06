@@ -258,6 +258,11 @@ def page_ingest():
                                                     ui.badge("待审核", color="orange").classes("text-xs")
                                                 ui.label(f"置信度 {overall_conf:.0%}").classes("text-xs text-gray-500")
                                             ui.label(f"分类: {classification.get('content_type', '?')} | 领域: {', '.join(classification.get('domain', []))}").classes("text-xs text-gray-400")
+                                    # 检查钩子失败
+                                    hook_failures = ingest_result.get("hook_failures", [])
+                                    if hook_failures:
+                                        msg = "⚠️ 外部钩子执行失败：" + "；".join(hook_failures)
+                                        ui.notify(msg, type="warning", multi_line=True)
                                 else:
                                     with batch_result_panel:
                                         with ui.card().classes("w-full p-2"):
@@ -441,6 +446,11 @@ def page_ingest():
                 )
                 if result.get("ok"):
                     ui.notify(f"✅ 摄入成功！({result.get('chunks', '?')} 块, 置信度 {overall_conf:.0%})", type="positive")
+                    # 检查钩子失败
+                    hook_failures = result.get("hook_failures", [])
+                    if hook_failures:
+                        msg = "⚠️ 外部钩子执行失败：" + "；".join(hook_failures)
+                        ui.notify(msg, type="warning", multi_line=True)
                     # 重置表单
                     ingest_content = ""
                     content_text.set_value("")
