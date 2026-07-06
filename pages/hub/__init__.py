@@ -37,7 +37,7 @@ def page_hub():
         ui.label("📚 知识中枢").classes("text-h5 font-bold")
 
     # ── 系统状态 ──
-    refresh_system_state(force=False)
+    refresh_system_state()
 
     # ── 6 个标签页 ────────────────────────────────────────────────────────────
     with ui.tabs().classes("w-full") as tabs:
