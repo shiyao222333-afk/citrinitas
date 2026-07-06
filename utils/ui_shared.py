@@ -228,12 +228,15 @@ def build_left_drawer(active_page: str = ""):
 # ═══════════════════════════════════════════
 
 def render_chunk_card(c: dict, idx: int):
-    """渲染搜索结果卡片（U4 修复 - 显示新字段）"""
+    """渲染搜索结果卡片（显示来源文件链接 + 追溯信息）"""
+    import os
+    import subprocess
+
     with ui.card().classes("w-full"):
         title = c.get("title") or c.get("source") or "未知"
         ui.markdown(f"**{idx}.** {title}")
 
-        # 显示新字段（U4 修复）
+        # 显示分类字段
         with ui.row().classes("items-center gap-2 wrap"):
             if c.get("needs_review"):
                 ui.badge("⚠️ 待审核", color="orange").classes("text-xs")
@@ -242,5 +245,33 @@ def render_chunk_card(c: dict, idx: int):
             ui.label(f"✅ {c.get('epistemic_status', 'N/A')}").classes("text-xs text-gray-400")
             ui.label(f"⏱️ {c.get('temporal_nature', 'N/A')}").classes("text-xs text-gray-500")
 
+        # 来源文件信息 + 打开按钮
+        source = c.get("source", "")
+        if source and source != "Manual Input":
+            with ui.row().classes("items-center gap-2 mt-1"):
+                ui.label(f"📂 来源: {source}").classes("text-xs text-blue-400")
+                # 如果文件存在，提供打开按钮
+                if os.path.exists(source):
+                    def _open_source():
+                        """打开原始文件（跨平台）"""
+                        try:
+                            os.startfile(source)
+                        except AttributeError:
+                            # macOS/Linux
+                            cmd = ["open", source] if os.name == "posix" else ["xdg-open", source]
+                            subprocess.run(cmd, check=False)
+
+                    ui.button("📂 打开文件", on_click=lambda e: _open_source(),
+                              size="xs").props("dense flat color=blue")
+
+        # 手动输入的来源
+        if source == "Manual Input":
+            ui.label("✏️ 来源: 手动输入").classes("text-xs text-green-400 mt-1")
+
+        # 追溯信息（doc_id + chunk_id）
+        with ui.expansion("📋 追溯信息", icon="info").classes("w-full mt-1"):
+            ui.label(f"文档 ID: {c.get('doc_id', 'N/A')}").classes("text-xs text-gray-500")
+            ui.label(f"块 ID: {c.get('chunk_id', 'N/A')}").classes("text-xs text-gray-500")
+            ui.label(f"分数: {c.get('score', 0):.4f}").classes("text-xs text-gray-500")
+
         ui.markdown(f"```\n{c.get('text', '')[:300]}\n```")
-        ui.label(f"分数: {c.get('score', 0):.2f}").classes("text-xs text-gray-500")
