@@ -75,7 +75,7 @@ async def _build_browse_tab():
         doc_container.clear()
         batch_bar.clear()
 
-        client = context.get_client()
+        client = context.client
 
         current_page = 1
         page_size = 20
@@ -304,7 +304,7 @@ def _batch_delete(selected_ids: set, on_refresh):
         ui.notify("未选择任何文档", type="warning")
         return
 
-    client = context.get_client()
+    client = context.client
 
     async def _do_batch_delete():
         with client:
