@@ -16,7 +16,7 @@ import json
 import os
 import sys
 import re
-import threading
+import time
 import logging
 from typing import Optional
 from collections import defaultdict
@@ -212,8 +212,8 @@ def _step_pre_store_hooks(state: dict) -> dict:
     for hook in get_hooks():
         try:
             result = hook(state)
-            if result is not None:
-                state = result
+            if isinstance(result, dict):
+                state.update(result)
         except Exception as e:
             msg = f"预存储钩子 {getattr(hook, '__name__', str(hook))} 执行失败: {e}"
             logger.warning(msg)
@@ -297,8 +297,8 @@ PIPELINE = [
     ("log_ingest",       _step_log_ingest),
 ]
 
-# ── 摄入并发保护锁 ──
-_ingest_lock = threading.Lock()
+# 注：不再使用全局串行锁——各步骤的子组件（sparse_encoder 自带线程锁、Qdrant 写入相互独立）
+# 已是线程安全的；串行锁会在嵌入重试等待期间阻塞全部入库（网页 + 守望文件夹）。
 
 
 def ingest(
@@ -337,6 +337,9 @@ def ingest(
     if not skip_duplicates:
         skip.add("dedup")
 
+    # 嵌入模型：环境变量 KB_EMBED_MODEL 优先（配置页可即时生效），其次参数，再次常量
+    model = os.environ.get("KB_EMBED_MODEL") or model or EMBED_MODEL
+
     state = {
         "file_path": file_path,
         "text": text,
@@ -357,20 +360,19 @@ def ingest(
     }
 
     try:
-        with _ingest_lock:
-            for step_name, step_fn in PIPELINE:
-                if step_name in skip:
-                    continue
-                result = step_fn(state)
-                if not result.get("ok"):
-                    log_activity(
-                        action="ingest_failed",
-                        doc_id=state.get("doc_id", ""),
-                        detail=result.get("error", f"步骤 {step_name} 失败"),
-                        collection=state["collection"],
-                        source=state.get("source", ""),
-                    )
-                    return result
+        for step_name, step_fn in PIPELINE:
+            if step_name in skip:
+                continue
+            result = step_fn(state)
+            if not result.get("ok"):
+                log_activity(
+                    action="ingest_failed",
+                    doc_id=state.get("doc_id", ""),
+                    detail=result.get("error", f"步骤 {step_name} 失败"),
+                    collection=state["collection"],
+                    source=state.get("source", ""),
+                )
+                return result
     except Exception as e:
         import traceback
         err_msg = f"摄入异常中断: {e}"

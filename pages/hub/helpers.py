@@ -113,5 +113,6 @@ def _get_inbox_stats() -> dict:
         "processing": sum(1 for s in states if s == "processing"),
         "failed": sum(1 for s in states if s == "failed"),
         "needs_review": sum(1 for s in states if s == "needs_review"),
+        "retry": sum(1 for s in states if s == "retry"),
         "done": sum(1 for s in states if s == "done"),
     }

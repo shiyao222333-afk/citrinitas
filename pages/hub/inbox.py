@@ -37,6 +37,8 @@ async def _build_inbox_tab():
             stat_parts = []
             if stats["pending"]:
                 stat_parts.append(f"⏳ 待处理: {stats['pending']}")
+            if stats["processing"]:
+                stat_parts.append(f"🔄 处理中: {stats['processing']}")
             if stats["failed"]:
                 stat_parts.append(f"❌ 失败: {stats['failed']}")
             if stats["needs_review"]:
@@ -53,8 +55,8 @@ async def _build_inbox_tab():
                 _refresh_inbox()
 
             with ui.row().classes("gap-2 mb-3"):
-                for label, key in [("全部", "all"), ("待处理", "pending"), ("失败", "failed"),
-                                    ("需审核", "needs_review"), ("重试中", "retry")]:
+                for label, key in [("全部", "all"), ("待处理", "pending"), ("处理中", "processing"),
+                                    ("失败", "failed"), ("需审核", "needs_review"), ("重试中", "retry")]:
                     color = "blue" if filter_state["value"] == key else "grey"
                     ui.button(label, on_click=lambda k=key: _set_filter(k)).props(f"color={color} flat size=sm")
 
@@ -66,15 +68,16 @@ async def _build_inbox_tab():
 
     _refresh_inbox()
 
-    # 自动刷新：每 3 秒刷新收件箱，实时反映守望处理进度（无需手动点刷新）
-    if not getattr(_build_inbox_tab, "_timer_started", False):
-        def _auto_refresh():
-            try:
-                _refresh_inbox()
-            except Exception:
-                pass
-        ui.timer(3.0, _auto_refresh)
-        _build_inbox_tab._timer_started = True
+    # 自动刷新：每 3 秒刷新收件箱，实时反映守望处理进度（无需手动点刷新）。
+    # 注意：不缓存"已启动"标记——页面函数为每个新客户端连接重新执行，
+    # NiceGUI 在页面销毁时会自动回收对应定时器。若缓存标记，切走再回来会
+    # 复用指向已销毁旧页面的旧定时器，导致刷新静默失效。
+    def _auto_refresh():
+        try:
+            _refresh_inbox()
+        except Exception:
+            pass
+    ui.timer(3.0, _auto_refresh)
 
     with ui.row().classes("gap-2 mt-2"):
         ui.button("🔄 刷新", on_click=_refresh_inbox).props("flat")
@@ -135,7 +138,7 @@ def _build_inbox_card(item: dict, on_refresh):
                 ui.badge(failure_type, color="grey").classes("text-xs")
 
         # 详细信息（仅失败/需审核/重试时显示）
-        if state in ("failed", "needs_review", "retry"):
+        if state in ("failed", "needs_review", "retry", "processing"):
             with ui.column().classes("w-full text-xs text-gray-500 mt-1"):
                 ui.label(f"失败步骤: {step_cn}")
                 if error:
@@ -150,7 +153,7 @@ def _build_inbox_card(item: dict, on_refresh):
 
         with ui.row().classes("gap-2 mt-2"):
             # 重试按钮（失败/需审核/重试状态）
-            if state in ("failed", "needs_review", "retry"):
+            if state in ("failed", "needs_review", "retry", "processing"):
                 async def _retry(fn=filename):
                     if _retry_inbox_file(fn):
                         ui.notify(f"✅ {fn} 已加入处理队列", type="positive")

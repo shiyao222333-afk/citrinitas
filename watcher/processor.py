@@ -501,7 +501,9 @@ def _process_file(filepath: str, cancel_event: threading.Event = None):
                 continue
             return
 
-        if ingest_result.get("ok") and "duplicate" in ingest_result.get("error", "").lower():
+        # 重复文件已在 _do_ingest 内部完成处理（标记 done / 删除文件 / 计数），
+        # 此处不可再走 _do_post_ingest，否则会重复计数。
+        if not ingest_result.get("ok"):
             return
 
         _do_post_ingest(filepath, filename, retention, needs_review, overall_conf, cancel_event)

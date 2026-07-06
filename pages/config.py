@@ -127,8 +127,9 @@ def page_config():
                     if val:
                         _save_env({"KB_EMBED_MODEL": val})
                         os.environ["KB_EMBED_MODEL"] = val
-                        kb_query.EMBED_MODEL = val
-                        ui.notify("✅ 嵌入模型已保存", type="positive")
+                        # 即时生效：ingest/embed 在调用时读取 os.environ["KB_EMBED_MODEL"]
+                        # （见 services/ingest_service.py 与 text_pipeline/embed.py），无需重启即可切换。
+                        ui.notify("✅ 嵌入模型已保存（即时生效）", type="positive")
 
                 ui.button("💾 保存", on_click=save_embed).props("color=blue")
 

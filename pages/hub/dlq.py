@@ -199,8 +199,8 @@ def _show_dlq_upload_dialog(item: dict, refresh_callback):
                             return
 
                         text = extract_result.get("text", "") if isinstance(extract_result, dict) else str(extract_result)
-                        if len(text) > 5000:
-                            text = text[:5000]
+                        # 分类只取前 5000 字（与 pages/ingest.py 一致），但入库传全文，避免丢数据
+                        classify_text = text[:5000] if len(text) > 5000 else text
 
                         auto_meta = {}
                         try:
@@ -213,7 +213,7 @@ def _show_dlq_upload_dialog(item: dict, refresh_callback):
                         import classify_pipeline
                         classify_result = await asyncio.to_thread(
                             classify_pipeline.classify_document,
-                            text,
+                            classify_text,
                             auto_meta,
                             STATE.get("current_project", "通用"),
                         )

@@ -9,6 +9,7 @@ import os
 import sys
 import asyncio
 import json
+import uuid
 from datetime import datetime, timezone
 
 from nicegui import ui
@@ -58,6 +59,15 @@ def page_ingest():
         ingest_method = ""
         ocr_temp_path = None   # 图片 OCR 的临时文件路径
         ocr_fname = None      # 图片文件名
+
+        def _cleanup_ocr_temp():
+            """页面关闭时清理可能遗留的图片 OCR 临时文件。"""
+            if ocr_temp_path and os.path.exists(ocr_temp_path):
+                try:
+                    os.unlink(ocr_temp_path)
+                except OSError:
+                    pass
+        ui.context.client.on_disconnect(_cleanup_ocr_temp)
 
         # ── Tab 1: 文件上传 ──
         with tab_panels:
@@ -168,6 +178,12 @@ def page_ingest():
 
                         if is_ocr:
                             # 图片文件：保存路径，显示「开始识别」按钮，不自动 OCR
+                            # 若之前有未清理的图片临时文件，先删掉，避免泄漏
+                            if ocr_temp_path and os.path.exists(ocr_temp_path):
+                                try:
+                                    os.unlink(ocr_temp_path)
+                                except OSError:
+                                    pass
                             ocr_temp_path = temp_path
                             ocr_fname = fname
                             temp_path = None  # 防止 finally 删除临时文件
@@ -227,7 +243,7 @@ def page_ingest():
                                 }
                                 dlq_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "local_data", "dead_letter")
                                 os.makedirs(dlq_dir, exist_ok=True)
-                                dlq_fp = os.path.join(dlq_dir, f"dlq_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{fname}.json")
+                                dlq_fp = os.path.join(dlq_dir, f"dlq_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}_{fname}.json")
                                 with open(dlq_fp, "w", encoding="utf-8") as df:
                                     json.dump(dlq_entry, df, ensure_ascii=False)
                                 with batch_result_panel:
@@ -417,7 +433,7 @@ def page_ingest():
                 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 dlq_dir = os.path.join(PROJECT_DIR, "local_data", "dead_letter")
                 os.makedirs(dlq_dir, exist_ok=True)
-                dlq_file = os.path.join(dlq_dir, f"{int(time.time())}.json")
+                dlq_file = os.path.join(dlq_dir, f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}.json")
                 dlq_data = {
                     "content": ingest_content[:3000],
                     "metadata": metadata,
