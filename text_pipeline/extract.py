@@ -128,164 +128,22 @@ def detect_language(text: str) -> str:
 
 def extract_text(file_path: str) -> dict:
     """
-    统一文本提取入口：根据文件扩展名调用对应解析器。
+    统一文本提取入口。
 
-    支持格式：
-      - .txt / .md / .json / .csv → 直接读取（自动检测编码）
-      - .docx → python-docx 提取文本
-      - .html / .htm → BeautifulSoup 提取文本（去除标签）
-      - .srt → 解析 SRT 字幕格式（去除时间戳）
-      - .pdf → 尝试 pdfplumber 提取文本
+    ⚠️ 实际提取已统一委托给 utils.file_handler.extract_text
+    （全格式：txt/md/json/csv/docx/html/srt/pdf/epub/pptx/图片OCR 等）。
+    本函数仅作为兼容包装层，保留旧调用方依赖的 chars / meta 字段，
+    避免分散的多套提取实现再次出现「某条路径漏支持某格式」的问题。
 
     返回:
         {"ok": True, "text": "...", "chars": N, "meta": {}}
         {"ok": False, "error": "..."}
     """
-    if not os.path.exists(file_path):
-        return {"ok": False, "error": f"文件不存在: {file_path}"}
-
-    ext = os.path.splitext(file_path)[1].lower()
-
-    # ── 纯文本格式：直接读取 ──
-    if ext in (".txt", ".md", ".json", ".csv", ".log"):
-        encoding = detect_encoding(file_path)
-        try:
-            with open(file_path, "r", encoding=encoding) as f:
-                text = f.read()
-            return {"ok": True, "text": text, "chars": len(text), "meta": {"encoding": encoding}}
-        except Exception as e:
-            return {"ok": False, "error": f"读取文件失败: {e}"}
-
-    # ── DOCX 格式 ──
-    if ext == ".docx":
-        try:
-            doc = Document(file_path)
-            parts = []
-            for para in doc.paragraphs:
-                if para.text.strip():
-                    parts.append(para.text)
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        if cell.text.strip():
-                            parts.append(cell.text)
-            text = "\n\n".join(parts)
-            return {"ok": True, "text": text, "chars": len(text), "meta": {"format": "docx"}}
-        except Exception as e:
-            return {"ok": False, "error": f"解析 DOCX 失败: {e}"}
-
-    # ── HTML 格式 ──
-    if ext in (".html", ".htm"):
-        try:
-            with open(file_path, "r", encoding=detect_encoding(file_path)) as f:
-                soup = BeautifulSoup(f.read(), "html.parser")
-            for tag in soup(["script", "style"]):
-                tag.decompose()
-            text = soup.get_text(separator="\n")
-            text = re.sub(r"\n{3,}", "\n\n", text).strip()
-            return {"ok": True, "text": text, "chars": len(text), "meta": {"format": "html"}}
-        except Exception as e:
-            return {"ok": False, "error": f"解析 HTML 失败: {e}"}
-
-    # ── SRT 字幕格式 ──
-    if ext == ".srt":
-        try:
-            encoding = detect_encoding(file_path)
-            with open(file_path, "r", encoding=encoding) as f:
-                content = f.read()
-            lines = []
-            for line in content.split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                if line.isdigit():
-                    continue
-                if "-->" in line:
-                    continue
-                lines.append(line)
-            text = "\n".join(lines)
-            return {"ok": True, "text": text, "chars": len(text), "meta": {"format": "srt", "encoding": encoding}}
-        except Exception as e:
-            return {"ok": False, "error": f"解析 SRT 失败: {e}"}
-
-    # ── PDF 格式（混合模式：先提取文本，失败则用 OCR）──
-    if ext == ".pdf":
-        try:
-            import pdfplumber
-            with pdfplumber.open(file_path) as pdf:
-                parts = []
-                for page in pdf.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        parts.append(page_text)
-                text = "\n\n".join(parts)
-
-            # 如果提取到足够文本，直接返回
-            if text.strip() and len(text.strip()) > 100:
-                return {"ok": True, "text": text, "chars": len(text), "meta": {"format": "pdf", "pages": len(pdf.pages), "ocr": False}}
-
-            # 文本太少，尝试 OCR（逐页转图片后识别）
-            logger.info(f"[PDF] 文本提取不足，启用 OCR: {file_path}")
-            ocr_parts = []
-            page_count = 0
-            try:
-                from pdf2image import convert_from_path
-                images = convert_from_path(file_path, dpi=200)
-                page_count = len(images)
-                for i, img in enumerate(images):
-                    import tempfile
-                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                        img.save(tmp.name, "PNG")
-                        result = ocr_image(tmp.name)
-                        if result.get("ok") and result.get("text"):
-                            ocr_parts.append(f"--- 第 {i+1} 页 ---\n{result['text']}")
-                        os.unlink(tmp.name)
-            except ImportError:
-                # pdf2image 未安装，尝试用 pymupdf
-                try:
-                    import fitz  # pymupdf
-                    doc = fitz.open(file_path)
-                    page_count = len(doc)
-                    for i, page in enumerate(doc):
-                        pix = page.get_pixmap(dpi=200)
-                        import tempfile
-                        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                            pix.save(tmp.name)
-                            result = ocr_image(tmp.name)
-                            if result.get("ok") and result.get("text"):
-                                ocr_parts.append(f"--- 第 {i+1} 页 ---\n{result['text']}")
-                            os.unlink(tmp.name)
-                except ImportError:
-                    return {"ok": False, "error": "PDF 无文本内容，且未安装 OCR 依赖（pdf2image 或 pymupdf）"}
-
-            if ocr_parts:
-                text = "\n\n".join(ocr_parts)
-                return {"ok": True, "text": text, "chars": len(text), "meta": {"format": "pdf", "pages": page_count, "ocr": True}}
-            return {"ok": False, "error": "PDF 无文本内容，OCR 也失败"}
-
-        except ImportError:
-            return {"ok": False, "error": "需要安装 pdfplumber：pip install pdfplumber"}
-        except Exception as e:
-            return {"ok": False, "error": f"解析 PDF 失败: {e}"}
-
-    # ── 图片格式：调用 OCR ──
-    if ext in (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"):
-        result = ocr_image(file_path)
-        if not result.get("ok"):
-            return {"ok": False, "error": result.get("error", "OCR 识别失败")}
-        text = result.get("text", "")
-        if not text.strip():
-            return {"ok": False, "error": "OCR 识别结果为空"}
-        return {
-            "ok": True,
-            "text": text,
-            "chars": len(text),
-            "meta": {
-                "format": "image",
-                "ocr_model": result.get("model", "unknown"),
-                "ocr_conf": result.get("conf", 0.0),
-            }
-        }
-
-    # ── 不支持的格式 ──
-    return {"ok": False, "error": f"不支持的文件格式: {ext}"}
+    from utils.file_handler import extract_text as _impl_extract_text
+    res = _impl_extract_text(file_path)
+    # 兼容旧返回字段（部分旧调用方读取 chars / meta）
+    if "chars" not in res:
+        res["chars"] = len(res.get("text", "") or "")
+    if "meta" not in res:
+        res["meta"] = {}
+    return res

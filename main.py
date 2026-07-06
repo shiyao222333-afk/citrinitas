@@ -36,6 +36,7 @@ from pages.ingest import page_ingest
 from pages.search import page_search
 from pages.hub    import page_hub
 from pages.config import page_config
+from pages.manage import page_manage
 
 # ── .env 写入辅助 ────────────────────────
 def _save_env(key: str, val: str):
