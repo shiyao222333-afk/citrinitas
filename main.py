@@ -23,6 +23,7 @@ if os.path.exists(ENV_FILE):
                 os.environ.setdefault(k.strip(), v.strip())
 
 # ── 页面 / 共享函数 导入 ─────────────────
+from qconst import QDRANT_URL
 from utils.state import STATE
 from utils.ui_shared import (
     render_chunk_card, build_left_drawer, refresh_system_state,
@@ -128,11 +129,11 @@ def _serve_report(filename: str):
 
 # ── 主入口 ───────────────────────────────
 if __name__ in {"__main__", "__mp_main__"}:
-    print(f"[启动] 检查 Qdrant: {kb_query.QDRANT_URL}/collections")
+    print(f"[启动] 检查 Qdrant: {QDRANT_URL}/collections")
     _qdrant_ok = False
     for _attempt in range(3):
         try:
-            _test = _r.get(f"{kb_query.QDRANT_URL}/collections", timeout=5)
+            _test = _r.get(f"{QDRANT_URL}/collections", timeout=5)
             if _test.status_code == 200:
                 logger.info("✅ Qdrant 连接正常")
                 _qdrant_ok = True
