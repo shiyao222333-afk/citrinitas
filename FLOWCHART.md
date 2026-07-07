@@ -28,7 +28,7 @@
 
 ```mermaid
 flowchart TB
-    F_WATCH([📁 守望v2<br/>data/inbox/ + state.jsonl])
+    F_WATCH([📁 守望v2<br/>library/inbox/ + file_state.jsonl])
     F1[拖入文件]
     F3[手动输入]
     F4[OCR图片]
@@ -78,7 +78,7 @@ flowchart TB
     N_UPDATE --> N7
 
     N7([⑤ 存储完成]) -->|部分坏| N_PAGES([⑥ 逐页分析<br/>WLNK决策])
-    N_PAGES --> KEEP([📥 保留原文件<br/>inbox/中保留])
+    N_PAGES --> KEEP([📥 保留原文件<br/>library/inbox/ 中保留])
     N_PAGES --> DELETE([🗑 删除原文件<br/>纯文本已入库])
 
     N7 -->|正常| DONE([✅ 完成])
@@ -98,7 +98,7 @@ flowchart TB
 
 | 节点 | 名称 | 输入 | 输出 | 逻辑 | 对应任务 |
 |:--:|------|------|------|------|:--:|
-| F_WATCH | 守望v2 | data/inbox/ 统一收件箱 | 文件→处理管线 | 统一收件箱 + file_state.jsonl 状态追踪；15故障×5策略(WLNK+逐页分析)；内容驱动保留(v1旧目录启动时自动迁移) | Task 1-6 |
+| F_WATCH | 守望v2 | library/inbox/ 统一收件箱 | 文件→处理管线 | 统一收件箱 + library/file_state.jsonl 状态追踪；15故障×5策略(WLNK+逐页分析)；内容驱动保留(v1旧目录启动时自动迁移) | Task 1-6 |
 | F1 | 拖入文件 | 本地文件 | 原始内容 | 用户拖入/选择 | 1h |
 | F3 | 手动输入 | 键盘/剪贴板 | 原始内容 | 用户打字 | 1i |
 | F4 | OCR图片 | 图片/扫描文档 | 原始图像 | PaddleOCR | — |
@@ -117,14 +117,14 @@ flowchart TB
 | N6 | ③ AI分类 | 纯文本 | 分面标签+置信度 | classify_document() LLM 按分面体系打分 | v0.4.0 |
 | C4 | 置信度路由 | 标签+置信度 | 高→入库, 中→审核, 低→DLQ | 三档阈值：≥0.75 直接 / 0.40-0.75 审核 / <0.40 DLQ | v0.4.5 |
 | N8 | ④ 审核队列 | 中置信度结果 | 确认后的标签 | 等待人工确认 | v0.4.5 |
-| N7 | ⑤ 存储 | 文本+标签+元数据 | 向量索引+文档注册 | metadata_source + source_path 写入<br/>含预存储钩子（Nigredo 接口）| v0.4.0, v0.7.0(B4) |
+| N7 | ⑤ 存储 | 文本+标签+元数据 | 向量索引+文档注册 | metadata_source + source_path 写入（书类指向 library/books/ 持久化源文件，v1.2.x）<br/>含预存储钩子（Nigredo 接口）| v0.4.0, v0.7.0(B4) |
 | N_PAGES | ⑥ 逐页分析 | 多页文档各页内容 | 每页可删性判断 | analyze_page_content() 5信号:非文本元素/密度/OCR可靠性/提取完整度/内容等效性 | Task 3-4 |
 | DL_CONF | ☠ 置信度死信 | 低置信度元数据 | JSON 文件 | 置信度<0.40→移入 local_data/dead_letter/ | v0.4.5 |
-| INBOX_FAILED | 📥 收件箱失败 | 处理失败的文件 | 留在 inbox/ + state 条目 | file_state.jsonl 记录 state:failed/needs_review/retry; 15故障×5策略(自动重试/等待基础设施/DLQ/审核/跳过) | Task 5 |
-| KEEP | 📥 保留原文件 | 含非文本元素的文件 | 保留在 inbox/ | WLNK:任一页不可删→保留整个文件 | Task 4 |
+| INBOX_FAILED | 📥 收件箱失败 | 处理失败的文件 | 留在 library/inbox/ + library/file_state.jsonl 条目 | library/file_state.jsonl 记录 state:failed/needs_review/retry; 15故障×5策略(自动重试/等待基础设施/DLQ/审核/跳过) | Task 5 |
+| KEEP | 📥 保留原文件 | 含非文本元素的文件 | 保留在 library/inbox/ | WLNK:任一页不可删→保留整个文件 | Task 4 |
 | DELETE | 🗑 删除原文件 | 全部页面纯文本 | 删除原文件 | WLNK:全部页面可删→内容已入库，可删原文件 | Task 4 |
 | N_PRE | 预处理 | 解码后全文 | 清洗后文本 | 自动纠错 + 统一语言翻译 + 去除广告/抓取残留（v1.5.0 规划） | 未来 |
-| N_BOOK | 📚 书库归档 | 书籍类已存储内容 | 归一化源文件+位置指针+书目录 | 录入前归一化为统一格式，每块记章节/段落指针，搜索按源聚成书/丛书（v1.2.0 规划） | 未来 |
+| N_BOOK | 📚 书库归档 | 书籍类已存储内容 | library/books/ 源文件 + 位置指针 + 书目录 | 书类源文件持久化到 library/books/（不删）；切块记章节/段落指针；所有图片统一进 library/images/；确定性 doc_id 去重（v1.2.x 规划） | 未来 |
 | N_RESUME | ⏸ 断点续存 | 大文件处理中状态 | 最后完成块+续跑 | 源持久化+增量写+记块，关机重启可续（v1.2.x 规划，文字小说优先） | 未来 |
 
 ### 摄入连线
@@ -159,7 +159,7 @@ flowchart TB
 | N7→DONE | — | 非守望来源正常完成 |
 | C3→N_PRE | 解码后全文 | 编码通过 |
 | N_PRE→N5 | 清洗后全文 | 预处理完成 |
-| N7→N_BOOK | 书籍类已存储内容 | 书籍来源(未来) |
+| N7→N_BOOK | 书籍类已存储内容 | 书籍来源(v1.2.x) |
 | N7→N_RESUME | 大文件处理中状态 | 大文件续跑(未来) |
 
 ---
