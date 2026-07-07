@@ -62,3 +62,12 @@ data/inbox/*
 
 # WorkBuddy 内部目录
 .workbuddy/
+
+# 清理残留：不属于项目源码的临时/工具/快捷方式文件
+.codebuddy/
+.streamlit/
+ARTIFACTS/
+.qdrant-initialized
+qdrant.zip
+*.lnk
+
