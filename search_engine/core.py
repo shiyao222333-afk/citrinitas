@@ -187,7 +187,8 @@ def search(
     if score_threshold is None:
         score_threshold = SEARCH_SCORE_THRESHOLD
     if model is None:
-        model = EMBED_MODEL
+        # 交给 _embed 统一解析（含 KB_EMBED_MODEL 环境变量），与索引时模型一致
+        model = None
 
     # 嵌入查询
     try:

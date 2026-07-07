@@ -212,7 +212,7 @@ def answer(
     if top_k is None:
         top_k = SEARCH_TOP_K
     if model is None:
-        model = os.environ.get("EMBED_MODEL", "qwen3-embedding:4b")
+        model = os.environ.get("KB_EMBED_MODEL", "qwen3-embedding:4b")
     if threshold is None:
         threshold = SEARCH_SCORE_THRESHOLD
     if table_split_threshold is None:
