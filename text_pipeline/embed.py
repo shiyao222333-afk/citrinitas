@@ -5,6 +5,7 @@ Text Pipeline — 嵌入向量
 """
 
 import logging
+import os
 import requests
 
 from qconst import OLLAMA_URL, EMBED_MODEL

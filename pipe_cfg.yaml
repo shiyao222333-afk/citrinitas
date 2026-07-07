@@ -6,9 +6,9 @@ embed:
   dim: 2560
   ollama_url: http://localhost:11434
 search:
-  top_k: 5
+  top_k: 10
   score_threshold: 0.3
-  chunks_per_doc: 3
+  chunks_per_doc: 20
   facet_cache_ttl: 30
   rerank:
     enabled: true

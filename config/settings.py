@@ -139,7 +139,7 @@ OLLAMA_URL = _yaml_or_env(
 
 # ── 搜索 ──
 SEARCH_TOP_K = _yaml_or_env(
-    "search.top_k", "KB_SEARCH_TOP_K", 5, cast=int,
+    "search.top_k", "KB_SEARCH_TOP_K", 10, cast=int,
     validator=lambda v: None if 1 <= v <= 100 else "must be 1-100",
 )
 SEARCH_SCORE_THRESHOLD = _yaml_or_env(
@@ -147,8 +147,8 @@ SEARCH_SCORE_THRESHOLD = _yaml_or_env(
     validator=lambda v: None if 0 <= v <= 1 else "must be 0-1",
 )
 SEARCH_CHUNKS_PER_DOC = _yaml_or_env(
-    "search.chunks_per_doc", "KB_SEARCH_CHUNKS_PER_DOC", 3, cast=int,
-    validator=lambda v: None if 1 <= v <= 10 else "must be 1-10",
+    "search.chunks_per_doc", "KB_SEARCH_CHUNKS_PER_DOC", 20, cast=int,
+    validator=lambda v: None if 1 <= v <= 50 else "must be 1-50",
 )
 FACET_CACHE_TTL = _yaml_or_env(
     "search.facet_cache_ttl", "KB_FACET_CACHE_TTL", 30, cast=int,

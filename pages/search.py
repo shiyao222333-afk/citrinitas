@@ -45,7 +45,7 @@ def page_search():
                 placeholder="例如：齿轮的失效形式有哪些？",
             ).classes("flex-1")
 
-            top_k = ui.number(label="Top K", value=5, min=1, max=20, step=1).classes("w-20")
+            top_k = ui.number(label="Top K", value=10, min=1, max=20, step=1).classes("w-20")
             use_llm = ui.switch("使用 AI 回答", value=True)
 
         search_btn = ui.button("🔍 搜索").props("color=blue size=lg")

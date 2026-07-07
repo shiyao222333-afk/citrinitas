@@ -28,31 +28,52 @@ def rerank_results(
     results: List[Dict[str, Any]],
     model: str = None,
     top_n: int = 20,
-    ollama_url: str = None
+    ollama_url: str = None,
+    query_vec: List[float] = None,
+    doc_vectors: Dict = None
 ) -> List[Dict[str, Any]]:
     """
     使用嵌入模型对搜索结果重新打分排序。
-    
+
     参数:
         query: 原始查询文本
         results: Qdrant 搜索结果列表（含 payload）
         model: 嵌入模型名称（用于计算相似度）
         top_n: 取前 N 个结果进行重排序
         ollama_url: Ollama API 地址
-        
+        query_vec: 搜索时已计算的 query 稠密向量（复用可省一次 Ollama 嵌入）
+        doc_vectors: {point_id: 稠密向量} 映射（来自 Qdrant 已存向量，复用可省 N 次 Ollama 嵌入）
+
     返回:
         重排序后的结果列表（含原始 score 和 rerank_score）
     """
     if not results:
         return results
-    
+
     # 使用环境变量或默认模型
     model = model or RERANKER_MODEL
     ollama_url = ollama_url or OLLAMA_URL
-    
+
     # 取前 top_n 个结果
     candidates = results[:top_n]
-    
+
+    # ── 快速路径：复用已存向量（推荐）──
+    # 搜索时已算出 query_vec，文档向量由 Qdrant 一并返回；直接用 numpy 算余弦，
+    # 免去对 20 个候选段落再次调用 Ollama 嵌入（每次搜索省约 2~3 秒），
+    # 且排序质量与原有 Ollama 路径等价（嵌入模型与入库时一致）。
+    if query_vec is not None and doc_vectors is not None:
+        rerank_scores = []
+        for r in candidates:
+            dv = doc_vectors.get(r.get("id"))
+            rerank_scores.append(_cosine_similarity(query_vec, dv) if dv else 0.0)
+        for i, r in enumerate(candidates):
+            r["rerank_score"] = round(rerank_scores[i], 4)
+        reranked = sorted(candidates, key=lambda x: x.get("rerank_score", 0), reverse=True)
+        if len(results) > top_n:
+            reranked.extend(results[top_n:])
+        print("[Reranker] ✅ 重排序完成（复用已存向量，免 Ollama 重嵌入）")
+        return reranked
+
     try:
         import requests
         

@@ -98,6 +98,7 @@ def _query_qdrant_rrf(
         "query": {"fusion": "rrf"},
         "limit": top_k,
         "with_payload": True,
+        "with_vector": True,  # 一并取回已存稠密向量，供重排序复用（免 Ollama 重嵌入）
     }
     if qdrant_filter:
         query_body["filter"] = qdrant_filter
@@ -115,11 +116,22 @@ def _query_qdrant_rrf(
     if score_threshold is not None:
         results = [r for r in results if r.get("score", 0) >= score_threshold]
 
+    # 构建 point_id → 稠密向量 映射，供重排序复用（避免对候选文档重复调用 Ollama 嵌入）
+    doc_vectors = {}
+    for r in results:
+        v = r.get("vector")
+        if isinstance(v, dict):
+            dv = v.get("dense") if "dense" in v else (next(iter(v.values())) if v else None)
+        else:
+            dv = v
+        doc_vectors[r["id"]] = dv
+
     # 重排序
     try:
         if RERANK_ENABLED:
             results = rerank_results(query=query, results=results,
-                                   model=RERANK_MODEL, top_n=RERANK_TOP_N)
+                                   model=RERANK_MODEL, top_n=RERANK_TOP_N,
+                                   query_vec=query_vec, doc_vectors=doc_vectors)
     except Exception as e:
         print(f"[Search] 重排序失败: {e}，尝试简单重排序")
         try:
