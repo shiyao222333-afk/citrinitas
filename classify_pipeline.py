@@ -485,6 +485,13 @@ def classify_document(text: str, file_metadata: dict = None, project_source: str
     # ── 验证并规范化所有字段值 ──
     _validate_and_normalize_merged(merged)
     
+    # ── 闪念联动：content_type=idea → lifecycle=idea（覆盖默认的 published）──
+    _ct = merged.get("content_type")
+    if _ct and isinstance(_ct, dict) and _ct.get("value") == "idea":
+        _lc = merged.get("lifecycle")
+        if _lc and isinstance(_lc, dict):
+            _lc["value"] = "idea"
+    
     # ── Layer 3: 程序计算置信度 ──
     overall_conf = calculate_confidence(merged)
     

@@ -236,15 +236,20 @@ def render_chunk_card(c: dict, idx: int):
     import os
     import subprocess
 
-    with ui.card().classes("w-full"):
+    _ct = c.get("content_type", "")
+    _is_idea = (_ct == "idea")
+    _card_cls = "w-full border-l-4 border-yellow-400" if _is_idea else "w-full"
+    with ui.card().classes(_card_cls):
         title = c.get("title") or c.get("source") or "未知"
-        ui.markdown(f"**{idx}.** {title}")
+        _prefix = "💡 " if _is_idea else ""
+        ui.markdown(f"**{idx}.** {_prefix}{title}")
 
         # 显示分类字段
         with ui.row().classes("items-center gap-2 wrap"):
             if c.get("needs_review"):
                 ui.badge("⚠️ 待审核", color="orange").classes("text-xs")
-            ui.label(f"📄 {c.get('content_type', 'N/A')}").classes("text-xs text-gray-400")
+            _ct_icon = "💡" if _is_idea else "📄"
+            ui.label(f"{_ct_icon} {_ct or 'N/A'}").classes("text-xs text-gray-400")
             ui.label(f"🏷️ {', '.join(c.get('domain', []))}").classes("text-xs text-gray-400")
             ui.label(f"✅ {c.get('epistemic_status', 'N/A')}").classes("text-xs text-gray-400")
             ui.label(f"⏱️ {c.get('temporal_nature', 'N/A')}").classes("text-xs text-gray-500")

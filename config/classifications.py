@@ -320,6 +320,10 @@ CLASSIFY_RULES = {
          "patterns": [r"doi:\s*10\.", r"arXiv:\s*\d+"]},
         {"value": "book", "keywords": ["前言", "序言", "后记", "目录", "第版"],
          "patterns": [r"第[一二三四五六七八九十\d]+章"]},
+        # idea 规则放在 video_script/personal_note 之前，避免"收藏""笔记"等词误抢灵感
+        {"value": "idea", "keywords": ["灵感", "点子", "突发奇想", "突然想到", "也许可以",
+                                        "要不试试", "TODO", "待办", "备忘", "一闪念",
+                                        "想法是", "有个想法"]},
         {"value": "video_script", "keywords": ["视频", "B站", "弹幕", "UP主", "点赞", "投币", "收藏", "剪辑"]},
         {"value": "social_post", "keywords": ["小红书", "公众号", "微博", "抖音", "种草", "安利"]},
         {"value": "personal_note", "keywords": ["日记", "心得", "笔记", "感想", "今天", "复盘"]},

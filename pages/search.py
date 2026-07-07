@@ -141,6 +141,23 @@ def page_search():
                             render_chunk_card(c, i+1)
                     STATE["last_search"] = result
 
+                # ── 相关灵感浮现：用同样的问题搜 idea 类型，取 3 条 ──
+                try:
+                    idea_result = await asyncio.to_thread(
+                        search, query, 3, search_col.value,
+                        None, None,                    # score_threshold, model 用默认
+                        {"content_type": ["idea"]},    # facet_filter 只看想法/灵感
+                    )
+                    if idea_result.get("ok") and idea_result.get("chunks"):
+                        with results_area:
+                            ui.separator()
+                            ui.markdown("### 💡 相关灵感")
+                            ui.markdown("*你之前记下的相关灵感*").classes("text-xs text-gray-400")
+                            for i, c in enumerate(idea_result["chunks"]):
+                                render_chunk_card(c, i+1)
+                except Exception:
+                    pass  # 灵感查询失败静默跳过，不影响主搜索
+
                 await asyncio.to_thread(refresh_system_state)
             except Exception as ex:
                 with results_area:
