@@ -158,7 +158,7 @@ def _show_dlq_edit_dialog(item: dict, refresh_callback):
                 except Exception as ex:
                     ui.notify(f"操作异常: {ex}", type="negative")
 
-            ui.button("✅ 确认并入库", on_click=lambda: asyncio.ensure_future(_submit())).props("color=blue")
+            ui.button("✅ 确认并入库", on_click=_submit).props("color=blue")
 
 
 def _show_dlq_upload_dialog(item: dict, refresh_callback):
@@ -173,7 +173,7 @@ def _show_dlq_upload_dialog(item: dict, refresh_callback):
 
         upload_result = ui.label("").classes("text-sm")
 
-        def _on_upload(e):
+        async def _on_upload(e):
             async def _handle():
                 try:
                     from utils.file_handler import detect_file_type, extract_text, extract_auto_metadata, SIZE_LIMIT_MB
@@ -258,7 +258,7 @@ def _show_dlq_upload_dialog(item: dict, refresh_callback):
                 except Exception as ex:
                     ui.notify(f"上传处理异常: {ex}", type="negative")
 
-            asyncio.ensure_future(_handle())
+            await _handle()
 
         upload = ui.upload(
             label="拖拽或点击上传新文件",

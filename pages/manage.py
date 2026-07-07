@@ -34,11 +34,11 @@ def page_manage():
                 label='审核状态'
             ).classes('w-64')
 
-            def _on_filter_change():
-                val = filter_select.value
-                nr = None if val == '全部文档' else (True if val == '待审核' else False)
-                page_state['needs_review'] = nr
-                asyncio.ensure_future(load_docs(1))
+        async def _on_filter_change():
+            val = filter_select.value
+            nr = None if val == '全部文档' else (True if val == '待审核' else False)
+            page_state['needs_review'] = nr
+            await load_docs(1)
             filter_select.on('update:model-value', lambda e: _on_filter_change())
 
         if not STATE["qdrant_online"]:
@@ -74,7 +74,7 @@ def page_manage():
                 ui.label("⚠️ 确认删除").classes("text-lg font-bold")
                 ui.label("删除后不可恢复。确定要删除此文档吗？")
                 with ui.row():
-                    ui.button("确认删除", on_click=lambda: asyncio.ensure_future(_do_delete()), color="red")
+                    ui.button("确认删除", on_click=_do_delete, color="red")
                     ui.button("取消", on_click=confirm_dlg.close)
 
         # ── 查看详情对话框 ──
@@ -153,7 +153,7 @@ def page_manage():
                             with ui.row().classes("gap-1"):
                                 ui.button(
                                     "👁️",
-                                    on_click=lambda u=uid: asyncio.ensure_future(show_detail(u)),
+                                    on_click=lambda u=uid: show_detail(u),
                                     color="blue",
                                 ).props("flat dense")
                                 def _del(u=uid):
@@ -168,13 +168,15 @@ def page_manage():
                 p = page_state["page"]
                 ui.button(
                     "◀ 上一页",
-                    on_click=lambda: asyncio.ensure_future(load_docs(p - 1)),
+                    on_click=lambda p=p: load_docs(p - 1),
                 ).props("flat dense").set_enabled(p > 1)
                 ui.label(f"第 {p} / {tp} 页（共 {page_state['total']} 篇）").classes("self-center")
                 ui.button(
                     "下一页 ▶",
-                    on_click=lambda: asyncio.ensure_future(load_docs(p + 1)),
+                    on_click=lambda p=p: load_docs(p + 1),
                 ).props("flat dense").set_enabled(p < tp)
 
         # 初次加载（用 timer 触发异步加载，不阻塞页面渲染）
-        ui.timer(0.1, lambda: asyncio.ensure_future(load_docs(1)), once=True)
+        async def _initial_load():
+            await load_docs(1)
+        ui.timer(0.1, _initial_load, once=True)

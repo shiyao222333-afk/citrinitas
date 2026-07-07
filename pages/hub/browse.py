@@ -70,7 +70,7 @@ async def _build_browse_tab():
     doc_container = ui.column().classes("w-full")
     batch_bar = ui.row().classes("w-full gap-2 items-center")
 
-    def _refresh_browse():
+    async def _refresh_browse():
         """刷新文档列表（异步加载 + 客户端过滤）。"""
         doc_container.clear()
         batch_bar.clear()
@@ -81,17 +81,17 @@ async def _build_browse_tab():
         page_size = 20
         total_pages = 1
 
-        def _go_prev():
+        async def _go_prev():
             nonlocal current_page
             if current_page > 1:
                 current_page -= 1
-                asyncio.ensure_future(_load())
+                await _load()
 
-        def _go_next():
+        async def _go_next():
             nonlocal current_page, total_pages
             if current_page < total_pages:
                 current_page += 1
-                asyncio.ensure_future(_load())
+                await _load()
 
         async def _load():
             with client:
@@ -187,7 +187,7 @@ async def _build_browse_tab():
                     if current_page >= total_pages:
                         next_btn.props("disabled")
 
-        asyncio.ensure_future(_load())
+        await _load()
     search_input.on("keydown.enter", lambda: _refresh_browse())
     ct_filter.on("update:model-value", lambda: _refresh_browse())
     domain_filter.on("update:model-value", lambda: _refresh_browse())
@@ -196,7 +196,7 @@ async def _build_browse_tab():
     sort_select.on("update:model-value", lambda: _refresh_browse())
 
     # 初始加载
-    _refresh_browse()
+    await _refresh_browse()
 
     ui.button("🔄 刷新", on_click=_refresh_browse).props("flat").classes("mt-2")
 
@@ -298,7 +298,7 @@ def _show_doc_quickview(doc: dict):
     dialog.open()
 
 
-def _batch_delete(selected_ids: set, on_refresh):
+async def _batch_delete(selected_ids: set, on_refresh):
     """批量删除选中的文档。"""
     if not selected_ids:
         ui.notify("未选择任何文档", type="warning")
@@ -328,6 +328,6 @@ def _batch_delete(selected_ids: set, on_refresh):
             on_refresh()
 
     ui.notify(f"正在删除 {len(selected_ids)} 条文档...", type="info")
-    asyncio.ensure_future(_do_batch_delete())
+    await _do_batch_delete()
 
 

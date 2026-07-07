@@ -38,7 +38,7 @@ async def _build_overview_tab():
         except Exception:
             pass
 
-    asyncio.ensure_future(_load_review_count())
+    await _load_review_count()
 
     # ═══════════════════════════════
     # Row 1: 统计卡片（5 列）
@@ -117,7 +117,7 @@ async def _build_overview_tab():
                 container = ui.column().classes("w-full")
                 facet_containers[facet_name] = container
 
-    asyncio.ensure_future(_load_facet_stats())
+    await _load_facet_stats()
 
     # ═══════════════════════════════
     # Row 2: 快速入口按钮
@@ -203,11 +203,11 @@ async def _build_overview_tab():
                     async def _after_create():
                         await asyncio.to_thread(refresh_system_state)
                         new_col_name.set_value("")
-                    asyncio.ensure_future(_after_create())
+                    await _after_create()
                 except Exception as ex:
                     ui.notify(f"创建失败: {ex}", type="negative")
 
-            ui.button("➕ 创建", on_click=lambda: asyncio.ensure_future(create_col())).props("color=blue flat")
+            ui.button("➕ 创建", on_click=create_col).props("color=blue flat")
 
         # 清空集合（带确认）
         async def do_clear_collection():
@@ -228,10 +228,11 @@ async def _build_overview_tab():
                 ui.label("所有数据将被永久删除，此操作不可撤销。").classes("text-sm text-gray-500")
                 with ui.row().classes("gap-2 mt-4"):
                     ui.button("取消", on_click=clear_dialog.close).props("flat")
-                    ui.button("确认清空", on_click=lambda: [
-                        asyncio.ensure_future(do_clear_collection()),
-                        clear_dialog.close(),
-                    ]).props("color=red")
+
+                    async def _confirm_clear():
+                        await do_clear_collection()
+                        clear_dialog.close()
+                    ui.button("确认清空", on_click=_confirm_clear).props("color=red")
 
         ui.button("🗑️ 清空当前库", on_click=clear_dialog.open).props("color=red flat").classes("ml-2")
 
@@ -242,7 +243,7 @@ async def _build_overview_tab():
             with ui.row().classes("w-full gap-2"):
                 for c in collections:
                     color = "green" if c == current else "grey"
-                    ui.button(c, on_click=lambda c=c: asyncio.ensure_future(_set_active_collection(c))).props(f"color={color} flat")
+                    ui.button(c, on_click=lambda c=c: _set_active_collection(c)).props(f"color={color} flat")
 
 
 async def _set_active_collection(collection_name: str):

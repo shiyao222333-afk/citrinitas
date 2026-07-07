@@ -132,9 +132,10 @@ def page_doc_detail(doc_uid: str):
                     ui.label("所有分块将被永久删除，此操作不可撤销。").classes("text-sm text-gray-500")
                     with ui.row().classes("gap-2 mt-4"):
                         ui.button("取消", on_click=del_dialog.close).props("flat")
-                        ui.button("确认删除", on_click=lambda: [
-                            asyncio.ensure_future(_delete_this()),
-                            del_dialog.close(),
-                        ]).props("color=red")
+
+                        async def _confirm_delete():
+                            await _delete_this()
+                            del_dialog.close()
+                        ui.button("确认删除", on_click=_confirm_delete).props("color=red")
 
             ui.button("🗑️ 删除此文档", on_click=del_dialog.open).props("color=red flat")

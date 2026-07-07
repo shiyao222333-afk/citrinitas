@@ -38,9 +38,9 @@ async def _build_review_tab():
             for doc in docs:
                 _build_review_card(doc, _refresh_review)
 
-    asyncio.ensure_future(_refresh_review())
+    await _refresh_review()
 
-    ui.button("🔄 刷新", on_click=lambda: asyncio.ensure_future(_refresh_review())).props("flat").classes("mt-2")
+    ui.button("🔄 刷新", on_click=_refresh_review).props("flat").classes("mt-2")
 
 
 def _build_review_card(doc: dict, on_refresh):
@@ -90,7 +90,7 @@ def _build_review_card(doc: dict, on_refresh):
                 except Exception as ex:
                     ui.notify(f"操作失败: {ex}", type="negative")
 
-            ui.button("✅ 通过并入库", on_click=lambda: asyncio.ensure_future(_approve())).props("color=green flat")
+            ui.button("✅ 通过并入库", on_click=_approve).props("color=green flat")
 
             # 丢弃按钮（带确认）
             async def _drop():
@@ -114,7 +114,11 @@ def _build_review_card(doc: dict, on_refresh):
                     ui.label("此操作不可撤销。").classes("text-sm text-gray-500")
                     with ui.row().classes("gap-2 mt-4"):
                         ui.button("取消", on_click=drop_dialog.close).props("flat")
-                        ui.button("确认丢弃", on_click=lambda: [asyncio.ensure_future(_drop()), drop_dialog.close()]).props("color=red")
+
+                        async def _confirm_drop():
+                            await _drop()
+                            drop_dialog.close()
+                        ui.button("确认丢弃", on_click=_confirm_drop).props("color=red")
 
             ui.button("❌ 丢弃", on_click=drop_dialog.open).props("color=red flat")
 
