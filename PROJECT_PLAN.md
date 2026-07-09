@@ -3,7 +3,7 @@
 > 功能路线图 + 设计决策。版本变更记录见 `CHANGELOG.md`，Bug 跟踪用 GitHub Issues。
 > 已完成版本的详细记录见 `CHANGELOG.md`，本文件只保留当前状态 + 未来规划。
 
-最后更新: 2026-07-07
+最后更新: 2026-07-09
 
 ---
 
@@ -34,7 +34,7 @@
 | **v1.2.x** | 🔮 | 交付 | **书库存储层 + 断点续存** — library/ 单一根目录（books 源文件 + images 所有图统一 + inbox 待处理 + file_state 状态）；切块记章节/段落位置指针；确定性 doc_id；书类不删源文件（按格式触发）；文字小说优先断点续存（源持久化 + 增量写 + 记最后完成块，关机可续，复用位置指针） |
 | v1.3.0 | 🔮 | 交付 | 对外接口 — MCP（AI 专用工具接口，让 AI 在对话里调用熔知搜索/入库）+ REST API（给其他软件 / 手机 App 对接）；与 OpusMagnum 对接 |
 | v1.4.0 | 🔮 | 交付 | 知识关系网 — NetworkX 图谱可视化 + QA 自动生成 + LLM 关系发现 |
-| v1.5.0 | 🔮 | 交付 | 录入预处理 — 自动纠错 + 统一语言翻译 + 去除广告/抓取残留/无关内容；网页 URL 直接摄入 |
+| v1.5.0 | 🔮 | 交付 | 录入预处理 — 抓取残留清洗 + 去除无关内容 + 网页 URL 直接摄入（自动纠错 / 统一语言翻译 / 去广告已上移 Albedo 认知精炼，由上游精炼阶段完成） |
 | v1.6.0 | 🔮 | 交付 | LLM 智能选择 — 用户可选云LLM / 本地小模型 / 机械程序 |
 | v1.7.0 | 🔮 | 交付 | 性能优化 — 后台服务模式 + 内存优化 + 嵌入批处理 + 启动并行化 |
 | v1.8.0 | 🔮 | 交付 | 知识保鲜 — 定期检查过期内容 + 提醒更新 + 批量重摄入 |
@@ -73,7 +73,7 @@
 
 **未来规划（已列入路线图）**：
 - **v1.3.0 对外接口**：MCP（AI 专用工具接口，让 AI 在对话里调用熔知搜索/入库）+ REST API（给其他软件 / 手机 App 对接），与 OpusMagnum 对接。
-- **v1.5.0 录入预处理**：自动纠错 + 统一语言翻译 + 去除广告/抓取残留/无关内容 + 网页 URL 直接摄入；**其中「OCR 分流通用模块」（纯图直存 / 含大量文字的图走 OCR）不止用于书籍，作为录入预处理通用能力，值得深入研究**。
+- **v1.5.0 录入预处理**：抓取残留清洗 + 去除无关内容 + 网页 URL 直接摄入（自动纠错 / 统一语言翻译 / 去广告已上移 Albedo 认知精炼，由上游在精炼阶段完成）；**其中「OCR 分流通用模块」（纯图直存 / 含大量文字的图走 OCR）不止用于书籍，作为录入预处理通用能力，值得深入研究**。
 - **重复录入同一本书**：因确定性 doc_id + 内容哈希去重，重录入会被判重、不重复建块；如确需强制重录，提供明确入口。
 
 ---
@@ -108,7 +108,7 @@
 
 - **搜索词→分面自动推断** — LLM 解析搜索词自动生成分面过滤（如 "齿轮国标" → domain:["6"] + content_type:"standard"）
 - **个人内容分类深化** — content_type 扩展子类（medical_record / financial_doc / diary）+ 隐私权限机制
-- **FPF 信任聚合（WLNK）** — 不放 Citrinitas，作为 Albedo 核心功能
+- **认知精炼职责已移交 Albedo（原部分归 Citrinitas）** — 质量评估（真/假/可疑）/ 优点分析 / 内容净化（去广告·纠错·翻译）及 FPF 信任聚合（WLNK）均归 Albedo 核心功能，由上游精炼阶段完成；熔知 v1.5.0 录入预处理仅保留「抓取残留清洗 + 去除无关内容 + 网页 URL 直接摄入」等存储侧清洗，不再做认知层加工
 - **project_source 升级** — 从普通字段升级为分面（Payload Index）
 - **关键词→UDC 映射增强** — 当前仅 52 条，待积累后增强为规则引擎
 - **normalize_facet_values() 独立化** — 当前内联校验，未来独立为统一入口函数
@@ -145,6 +145,50 @@ pages/hub.py (1418行) → pages/hub/ 包
 ```
 
 **拆分原则**：每步拆一个模块，拆完立即验证功能不变；`__init__.py` re-export，调用方零改动；单文件 ≤ 400行。
+
+---
+
+## 已知风险（架构审查 2026-07-08）
+
+> v1.2.x 书库存储层整批改动 + 摄入去重逻辑审查发现的隐患。非当前阻断，但影响数据完整性与未来维护。
+
+| # | 风险 | 位置 | 严重度 | 状态 |
+|---|------|------|--------|------|
+| R1 | 两条录入路线（手动上传页 vs 守望夹自动）行为会悄悄分裂。根因：两条路没共用"把文件路径/确定性 doc_id 传进去"这个动作——守望夹已修（#21/#24 让 doc_id 确定性 + source_path 可见），但手动上传页仍退化为随机 doc_id（见 R7），且强制重录开关对两条路行为不一致（见 R8） | `pages/ingest.py` + `watcher/processor.py` → `ingest_service.ingest` | 🟡 P1 | ✅ **#30 已根因修复**（统一确定性 doc_id + 写入清旧点，全路线行为一致） |
+| R2 | "重复就删源文件"是危险操作——自动删除源文件。#19 已对书类保护，但普通文档重复仍自动 `os.remove` 收件箱副本 | `watcher/processor.py` 重复跳过分支 | 🟡 P1 | 部分缓解（书已保护）；普通文档自动删源仍待决策（见 R10） |
+| R3 | 去重仅靠全文哈希，**无"版本/更新"概念**：新版/更完整的书因哈希不同被当全新内容并行入库，搜索返回两版混合 | `_step_dedup`（`content_hash` 整本文哈希） | 🟡 P1 | ✅ **#30 已缓解**：写入前按 doc_id 清旧点 → 同名文件"更新"=覆盖而非复制（R4 同步解决） |
+| R4 | 同名文件改版/精简（块数减少）重录入 → 旧高索引块成孤儿（仅 `force_reingest` 能清）；"更完整"(块数增多) 因 `point_id=(doc_id,chunk_index)` 碰撞反而被覆盖干净 | `point_id` 派生 + 普通路径不清旧块 | 🟡 P1 | ✅ **#30 已修复**：`_step_write_qdrant` 写入前按 doc_id 清空旧点，全路线零孤儿 |
+| R5 | 去重键的是"抽取后文本"，抽取方式一变（OCR 改进/归一化调整）同书即变"新内容" → 重复入库 | `_text_hash(state["text"])` | 💭 P2 | 未来 |
+| R6 | 去重查询异常被 `except Exception: pass` 静默吞掉 → Qdrant 抖动时去重悄悄失效、重复 creeping 无告警 | `_step_dedup` L148 | 💭 P2 | ✅ **#30 已修复**：`except` 改为 `logger.warning` |
+| R7 | **手动上传页 `doc_id` 非确定性 + 强制重录开关失效**：`pages/ingest.py` 调 `ingest()` 未传 `file_path` → `doc_id` 退化为随机 uuid。后果：① 手动上传的同名/同内容文件无法关联（确定性编号仅守望夹生效）；② 用户勾选的"♻️ 强制重录"开关**实际无效**——`delete_points_by_doc_id` 用新随机 id 删不到旧点，旧碎片照样残留（#26 开关的隐藏缺陷） | `pages/ingest.py` L465-470 | 🔴 P0 | ✅ **#30 已修复**：`_derive_doc_id` 增加内容哈希兜底 → 文本/粘贴/死信/OCR 路线 doc_id 确定性，强制重录开关在所有入口生效 |
+| R8 | **守望夹路径无强制重录触发**：`watcher/processor.py` `_do_ingest` 未传 `force_reingest`（永远 False）。非书类同名文件改版重录入必然残留孤儿碎片（R4），且**无任何 UI 入口可清理**——手动上传页强制重录因 R7 删不到守望夹旧 doc_id。即"自动录入的文件一旦改版，孤儿碎片永久滞留" | `watcher/processor.py` L309-316 | 🟡 P1 | ✅ **#30 已修复**：清旧点逻辑移入 `_step_write_qdrant`，对所有路线（含守望夹）自动生效，不再依赖 `force_reingest` 透传 |
+| R9 | **守望夹重复抽取（性能浪费）**：`watcher/processor.py` 先自行 `extract_text` 供 AI 分类，又把 `file_path` 传给 `ingest()` 导致管线内再抽一遍 → 大书/大文件双倍耗时，且两遍规则微调可能不一致 | `watcher/processor.py` + `ingest_service._step_read_content` | 💭 P2 | 未做（性能优化，非数据完整性）；#30 未触碰 |
+| R10 | 图片路径关联依赖"当前工作目录" → 程序从别处启动图显示不出（曾怀疑，审查后证伪） | — | — | ✅ **审查证伪**：图片以 `os.path.relpath(dest, PROJECT_DIR)` 存储，而 `PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))` 为绝对路径、与启动 CWD 无关，关联稳健 |
+| R11 | **覆盖更新非原子（先删后写）**：`_step_write_qdrant` 先 `delete_points_by_doc_id` 删光旧块再 PUT 写新块。若 PUT 失败（网络/Qdrant 抖动/超时），旧块已删新块未写 → 整本文档凭空消失 | `services/ingest_service.py:277-304` | 🔴 P0 | ✅ **#31 已修复**：改为「先 PUT 新块（确定性 id 覆盖 0..N-1）→ 再 `delete_orphan_points` 清旧高索引孤儿」，删除不再前置；写入失败直接报错且不碰旧数据 |
+| R12 | **删除失败被静默吞 → #30 孤儿修复没堵死**：`delete_points_by_doc_id` 删除 HTTP 非 200 仍返回 `ok=True, deleted=0`；调用方只在 `ok 且 deleted` 时记日志，否则跳过继续写 → 旧高索引块留成孤儿（R4 同款碎片，触发条件从"改版重录"换成"删除偶发失败"） | `doc_manager.py:600-610` + `ingest_service.py:288-294` | 🔴 P0 | ✅ **#31 已修复**：`delete_points_by_doc_id` 删除 HTTP 非 200 改返回 `ok=False`；`_step_write_qdrant` 改为写后清孤儿，孤儿清理失败仅告警不阻断 |
+| R13 | **doc_id / doc_uid 双身份字段**：每点同时存两字段且需恒等（`ingest_pipeline.py:151-152`）；CRUD 函数各用各的（doc_id: `search_by_doc_id`/`delete_points_by_doc_id`/`get_doc_ids`；doc_uid: `list_documents`/`get_document`/`delete_document`/`set_doc_relations`）。靠"写入时两值相等"才不崩，任一处只填一个即静默查不到一半功能 | `ingest_pipeline.py` + `doc_manager.py` | 🟡 P1 | ✅ **#32 已修复**：摄入停写冗余 `doc_uid`（每点只留权威 `doc_id`）；`list_documents`/`get_document`/`delete_document`/`update_document` 统一以 `doc_id` 过滤（新增 `_query_doc_points` 先 doc_id 再回退 doc_uid 兼容迁移前旧数据）；搜索结果 + 全部 UI 改读 `doc_id` |
+| R14 | **`update_document` 全量 PUT 会丢 BM25 稀疏向量**：读取带 `with_vector=True`，回写只取稠密 `vector` 未带 `bm25` → 更新元数据后混合检索退化为纯稠密。当前无人调用（死代码定时炸弹），`update_metadata` 用 `set_payload` 安全 | `doc_manager.py` | 🟡 P1 | ✅ **#33 已修复**：`update_document` 改用 `set_payload`（key-level merge，不动向量），混合检索不再退化 |
+| R15 | **图片文件只增不删**：文档从 Qdrant 删除时其引用图片不从 `library/images/` 清理；同一书重录入生成新图文件、旧图变孤儿 → 长期堆积 | `text_pipeline/ocr.py` + `doc_manager.delete_document`/`delete_orphan_points` | 💭 P2 | ✅ **#34 已修复**：`delete_document` 与 `delete_orphan_points`（重录清孤儿）删除时联动清理引用图片，删除限制在 `IMAGES_DIR` 内（防任意路径误删） |
+| R16 | **文本路线内容哈希碰撞**：`doc_id` 内容哈希兜底使两份不同文档但正文相同 → 同 doc_id → 互相覆盖（极罕见） | `ingest_pipeline.py:_derive_doc_id` | ⚪ P3 | 记录，暂不修 |
+
+**存储层加固（防未来同类问题，候选 #31）**：
+
+> 本轮审查（2026-07-08）发现：#30 虽统一了录入路线与覆盖更新，但存储写入本身是"先删后写"且失败静默，孤儿碎片与文档消失风险未真正归零；且项目**至今无自动化测试目录**，这是同类问题反复出现的根因。
+
+- **P0 修复（R11/R12）**：覆盖写改为「先 PUT 新块（确定性 point_id 覆盖 0..N-1）→ 再 scroll 查 doc_id 现存 point_id，删掉不在新集合里的孤儿」。即"先写后删孤儿"，删除失败也最多留旧碎片、绝不丢整本文档；删除步骤失败必须显式报错/重试，不再假装 ok。
+- **P1 修复（R13/R14）**：① 全项目砍掉 `doc_uid`，统一用 `doc_id`（CRUD 5 函数 + `search_engine/core.py` + UI 一并改）；② `update_document` 改用 `set_payload` API（保留向量）或直接删除死代码。 → ✅ **已实现（#32/#33）**
+- **P2 修复（R15）**：文档删除时联动清理 `library/images/` 中其引用图片；重录入前先清旧图。 → ✅ **已实现（#34）**
+- **根因治理（最关键）**：补契约测试目录 `tests/`，至少覆盖 4 条：① 重录后块数变化 → 断言最终块数正确且无孤儿；② 写入中途失败 → 断言文档不丢；③ 全库扫描 → 断言每点 `doc_id` 存在且（若保留）`doc_id==doc_uid`、无缺失；④ 更新元数据 → 断言稀疏向量仍在。再加「存储医生」脚本（启动/定期扫描孤儿 point_id、`doc_id` 缺失/≠`doc_uid`、`source_path` 指向已删文件）提前报警。 → ✅ **已实现（#35）**：`tests/test_storage_contract.py`（32 项契约测试，可直接 `python tests/test_storage_contract.py` 运行）+ `scripts/storage_doctor.py`（只读体检 + `--fix` 可选修复）
+- **架构约束**：所有路线与 CRUD 写入统一走 `ingest_service.ingest` 这一唯一带契约的入口，禁止旁路直写 Qdrant。
+
+**去重 / 版本处理设计（#30 已实施 ✅）**：
+- `doc_id` 由 `library/books/` 稳定文件名派生 = 书的身份（文件路线）；无文件时由正文内容哈希派生（文本/粘贴/死信/OCR 路线）。`ingest()` 起步即解析，所有录入路线共用同一编号规则。
+- **覆盖更新**：`_step_write_qdrant` 先 upsert 新块（确定性 point_id 覆盖 0..N-1），再 `delete_orphan_points(doc_id, keep_ids)` 仅清不在新集合的旧孤儿块（#31 改"先写后删孤儿"，消除写入失败整本文档消失的 R11；删除失败仅告警不阻断）。同名文件"更新"=覆盖而非复制，从根上消除 R3/R4 的并存与孤儿，且对所有路线（含守望夹）自动生效。
+- 保留 `content_hash` 精确去重作为快速拦截（完全相同文本不重复劳动）；去重发生在清旧点之前，故不会误删未重写的内容。
+- 去重查询异常改为 `logger.warning`，不再静默。
+- 保留 `content_hash` 精确去重作为快速拦截（完全相同文本不重复劳动）。
+- 可选：每块记录 `ingested_at`，UI 可显示"本书于 X 更新过"，支撑未来 v1.8.0 知识保鲜。
+- 若需保留多版本（而非覆盖），用不同文件名表达"这是另一版"，视为不同书——与用户心智一致。
 
 ---
 
