@@ -3,7 +3,7 @@
 > 功能路线图 + 设计决策。版本变更记录见 `CHANGELOG.md`，Bug 跟踪用 GitHub Issues。
 > 已完成版本的详细记录见 `CHANGELOG.md`，本文件只保留当前状态 + 未来规划。
 
-最后更新: 2026-07-09
+最后更新: 2026-07-12
 
 ---
 
@@ -11,7 +11,7 @@
 
 - 当前版本：**v1.2.0**（闪念笔记 — idea 自动识别 + 💡标记 + 相关灵感浮现，已发布）
 - 活跃 Bug：**0**
-- 下个版本：**v1.2.x** — 书库存储层（library/ 单一根目录 + 章节位置指针 + 图片统一 + 确定性 doc_id）+ 断点续存
+- 下个版本：**v1.2.x** — 断点续存（书库存储层核心已实现并已于 commit `e5078d0` 提交；剩断点续存未做）
 - Git 状态：main 分支
 
 ---
@@ -50,7 +50,18 @@
 
 ## 下一版本：v1.2.x 书库存储层
 
-**状态**：架构已定稿（本会话确认），待实现
+**状态**：书库存储层核心已实现并已于 2026-07-12 提交（commit `e5078d0`，#18–#41 + #48–#54 全批）。本批次交付：
+
+- `library/` 单一根目录 + 图片统一 `library/images/`（取消"每本书各建图目录"）
+- 章节 / 段落位置指针（`chapter_index` / `chapter_title` / `chunk_in_chapter`）
+- 确定性 `doc_id`（路径哈希优先、正文内容哈希兜底，覆盖更新零孤儿）
+- 书类不删源（按格式触发挪 `library/books/`）
+- 受控词表（`udc_code` / 题材 / 关键词同义词归一，未受控进待审核队列）
+- 存储原子性加固（先写后删孤儿 · `doc_id` 统一砍 `doc_uid` · `set_payload` 保留 BM25 向量 · 删图护栏）
+- 自动化回归防护（契约测试 `tests/` + 存储医生 `scripts/storage_doctor.py` + 导入冒烟 `tests/test_imports.py`）
+- 调试开关（配置页强制全量进待审核）+ 活动日志 `local_data/activity_log.jsonl`
+
+⚠️ **断点续存未做**（源持久化 + 增量写 + 记最后完成块，关机可续），留待后续版本。
 
 **核心决策（用户拍板）**：
 - **单一知识库根目录 `library/`**：知识库真正保存的内容集中于此，不再散落。结构：
@@ -122,10 +133,10 @@
 
 | # | 问题 | 位置 | 严重度 | 状态 |
 |---|------|------|--------|------|
-| 11 | `watcher.py` 单文件 1834 行，职责过多 | `watcher.py` | 🔴 P0 | 📋 待拆分 |
-| 12 | `pages/hub.py` 单文件 1418 行，多 Tab 混在一起 | `pages/hub.py` | 🔴 P0 | 📋 待拆分 |
+| 11 | `watcher.py` 单文件 1834 行，职责过多 | `watcher.py` → `watcher/` 包 | 🔴 P0 | ✅ 已拆分（v1.1.x 期间，`watcher/` 含 listener/state/processor/failures/utils/migration） |
+| 12 | `pages/hub.py` 单文件 1418 行，多 Tab 混在一起 | `pages/hub.py` → `pages/hub/` 包 | 🔴 P0 | ✅ 已拆分（v1.1.x 期间，`pages/hub/` 含 overview/browse/review/dlq/detail/inbox/logs/helpers） |
 
-**拆分方案**（v1.0.1 已部分完成，剩余）：
+**拆分方案**（✅ 已于 v1.1.x 期间完成）：
 
 ```
 watcher.py (1834行) → watcher/ 包
