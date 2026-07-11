@@ -89,7 +89,7 @@
 > <sup>1</sup> **OCR**：RAGFlow 用 DeepDoc 同等强大，但面向企业 PDF 批处理；Citrinitas 聚焦个人混合素材的 OCR→LLM纠错→摄入自动化闭环。FastGPT/Dify/AnythingLLM 无内置 OCR。  
 > <sup>2</sup> **公式**：Citrinitas 通过 PPStructureV3→LaTeX→KaTeX 将公式渲染为可缩放 SVG 嵌入搜索结果。RAGFlow 支持公式识别但渲染链路未确认。其余竞品不区分公式和普通文本。  
 > <sup>3</sup> **自动分类**：Citrinitas 用 LLM 四层管道自动标注分面字段，用户只需确认。所有竞品均无此能力。[→ FPF arxiv 2601.21116](docs/schema.md)  
-> <sup>4</sup> **格式检测**：除识别 8 种格式外还自动提取元数据 + chardet 编码兜底。RAGFlow 解析器矩阵更强，但不提取元数据。  
+> <sup>4</sup> **格式检测**：除识别 8 种格式外还自动提取元数据 + charset_normalizer 编码兜底。RAGFlow 解析器矩阵更强，但不提取元数据。  
 > <sup>5</sup> **置信度路由**：独有三档路由（≥0.8 直入 / 0.5-0.8 标记 / <0.5 隔离）+ 死信队列。竞品均为全有或全无。[→ PROJECT_PLAN.md](PROJECT_PLAN.md)  
 > <sup>6</sup> **表格拆分**：按行切分表格为独立检索单元，每行保留表头上下文。竞品按 token/分块切分，不做行级索引。  
 > <sup>7</sup> **分面分类**：基于 UDC 国际十进分类法 + FPF 认知层级，4 维标注，支持组合过滤。[→ UDC](https://www.udcsummary.info/)  
@@ -124,7 +124,7 @@ flowchart TD
     B -->|TXT/MD/DOCX/PPTX| D[📄 直接读取文本]
     B -->|图片/扫描PDF| E[🔍 PaddleOCR 识别]
 
-    C --> F{编码检测<br>chardet}
+    C --> F{编码检测<br>charset_normalizer}
     D --> F
     E --> G[🤖 LLM OCR 纠错]
     G --> F
@@ -217,7 +217,7 @@ graph TB
 | LLM 合成 | OpenAI 兼容 API（默认 DeepSeek） | 可切换通义千问/本地模型 |
 | 公式渲染 | [KaTeX](https://github.com/KaTeX/KaTeX) | 服务端渲染，矢量输出 |
 | Web UI | [NiceGUI](https://nicegui.io) 3.13 | SPA, FastAPI + Vue + Quasar + WebSocket |
-| 编码检测 | [chardet](https://github.com/chardet/chardet) | UTF-8 → GBK → latin-1 兜底链 |
+| 编码检测 | [charset_normalizer](https://github.com/jawah/charset_normalizer) | UTF-8 → GBK → latin-1 兜底链 |
 
 ---
 
@@ -447,7 +447,7 @@ The answer in one line:
 > <sup>1</sup> **OCR**: RAGFlow's DeepDoc (ONNX+pdfplumber) is equally strong but targets enterprise PDF batch processing; Citrinitas focuses on personal mixed media (screenshots/scans/EPUBs) with an OCR→LLM correction→ingestion **automated loop**. FastGPT/Dify/AnythingLLM have no built-in OCR.  
 > <sup>2</sup> **Formulas**: Citrinitas renders formulas as scalable SVG via PPStructureV3→LaTeX→KaTeX, embedded in search results. RAGFlow supports formula recognition but its dedicated rendering pipeline is unconfirmed. Others treat formulas as plain text.  
 > <sup>3</sup> **Auto-classification**: Citrinitas uses a 4-layer LLM pipeline (template→metadata→keyword→LLM inference) to auto-label facet fields; users only confirm. No competitor has this — RAGFlow chunks carry only coordinate tags, Dify requires manual pipeline configuration, FastGPT/AnythingLLM rely on folder organization. [→ FPF arxiv 2601.21116](docs/schema.md)  
-> <sup>4</sup> **Format detection**: Citrinitas goes beyond format ID to auto-extract metadata (EPUB Dublin Core / PDF Document Info / HTML meta) + chardet UTF-8→GBK encoding chain. RAGFlow's 7-parser matrix is more flexible but doesn't extract metadata automatically.  
+> <sup>4</sup> **Format detection**: Citrinitas goes beyond format ID to auto-extract metadata (EPUB Dublin Core / PDF Document Info / HTML meta) + charset_normalizer UTF-8→GBK encoding chain. RAGFlow's 7-parser matrix is more flexible but doesn't extract metadata automatically.  
 > <sup>5</sup> **Confidence routing**: Unique 3-tier routing (≥0.8 direct / 0.5-0.8 flagged / <0.5 quarantined) with Dead Letter Queue. All competitors use all-or-nothing — parse failures are silently discarded. This is Citrinitas' core safety design for personal knowledge management. [→ PROJECT_PLAN.md](PROJECT_PLAN.md)  
 > <sup>6</sup> **Table splitting**: Citrinitas splits tables by row as independent search units with header context preserved. RAGFlow chunks by token count (default 512), Dify uses parent-child mode — neither does row-level structural indexing.  
 > <sup>7</sup> **Faceted classification**: Based on UDC (Universal Decimal Classification) + FPF epistemic hierarchy. 4 dimensions (type × domain × temporality × verification) with Payload Indexes. Competitors use folder/label 2D organization — none distinguishes "math theorem (evergreen/corroborated)" from "industry news (transient/unverified)." [→ UDC](https://www.udcsummary.info/)  
@@ -579,7 +579,7 @@ graph TB
 | LLM | OpenAI-compatible API (default DeepSeek) | Swappable (Qwen, local models) |
 | Formula | [KaTeX](https://github.com/KaTeX/KaTeX) | Server-side rendering, vector output |
 | Web UI | [NiceGUI](https://nicegui.io) 3.13 | SPA, FastAPI + Vue + Quasar + WebSocket |
-| Encoding | [chardet](https://github.com/chardet/chardet) | UTF-8 → GBK → latin-1 fallback chain |
+| Encoding | [charset_normalizer](https://github.com/jawah/charset_normalizer) | UTF-8 → GBK → latin-1 fallback chain |
 
 ---
 

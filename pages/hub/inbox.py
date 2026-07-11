@@ -24,7 +24,7 @@ async def _build_inbox_tab():
             items = _load_inbox_files()
 
             if not items:
-                ui.badge("📭 收件箱为空 — 将文件放入 data/inbox/ 目录即可自动处理", color="grey").classes("text-lg")
+                ui.badge("📭 收件箱为空 — 将文件放入 library/inbox/ 目录即可自动处理", color="grey").classes("text-lg")
                 ui.label(f"监控目录: {INBOX_DIR}").classes("text-xs text-gray-500 mt-2")
                 return
 
@@ -81,7 +81,7 @@ async def _build_inbox_tab():
 
     with ui.row().classes("gap-2 mt-2"):
         ui.button("🔄 刷新", on_click=_refresh_inbox).props("flat")
-        ui.label(f"目录: data/inbox/").classes("text-xs text-gray-500 ml-4")
+        ui.label(f"目录: library/inbox/").classes("text-xs text-gray-500 ml-4")
 
 
 def _build_inbox_card(item: dict, on_refresh):

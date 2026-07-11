@@ -1,6 +1,11 @@
 """
 Enum Guard — 模糊映射表 + 分面值规范化。
 
+【小白导读 · 这个文件干嘛的？】
+  "枚举守卫"= 给文档分类的"固定选项表"。AI 给文档打的类别（内容类型/领域/时效/可信度等）
+  必须落在固定几种里，不能乱写。这个文件就是把 AI 写偏的词纠正回标准词。
+  例：AI 写"社媒文案"→ 纠正成标准词 "social_post"。术语不懂看 docs/GLOSSARY.md。
+
 Extracted from config/classifications.py (v0.7.0 B1 refactor).
 
 管道位置:
@@ -14,6 +19,7 @@ Extracted from config/classifications.py (v0.7.0 B1 refactor).
 
 # ════════════════════════════════════════════
 # G1: 模糊映射表（LLM 常见跑偏 → 标准 key）
+# 中文/英文各种写法都映射到同一个标准词，AI 写偏也能纠正回来
 # ════════════════════════════════════════════
 FUZZY_FACET_MAPPING = {
     "content_type": {
@@ -236,6 +242,39 @@ FUZZY_FACET_MAPPING = {
         "test_data":       "test_data",
         "testing":         "test_data",
     },
+    "lifecycle": {
+        # 中文 → 标准 key
+        "想法": "idea",
+        "点子": "idea",
+        "构思": "idea",
+        "草稿": "draft",
+        "拟稿": "draft",
+        "初稿": "draft",
+        "进行中": "in_progress",
+        "开发中": "in_progress",
+        "编写中": "in_progress",
+        "制作中": "in_progress",
+        "审核中": "review",
+        "评审中": "review",
+        "待审": "review",
+        "审阅": "review",
+        "已发布": "published",
+        "发布": "published",
+        "上线": "published",
+        "正式": "published",
+        "已归档": "archived",
+        "归档": "archived",
+        "存档": "archived",
+        # 英文变体 → 标准 key
+        "idea": "idea",
+        "draft": "draft",
+        "in progress": "in_progress",
+        "in_progress": "in_progress",
+        "review": "review",
+        "reviewing": "review",
+        "published": "published",
+        "archived": "archived",
+    },
 }
 
 
@@ -394,3 +433,34 @@ def normalize_facet_values(metadata: dict) -> dict:
                 metadata["knowledge_type"] = "concept"  # fallback
     
     return metadata
+
+
+def normalize_lifecycle(value, default: str = "published") -> str:
+    """
+    归一化 lifecycle（生命周期）字段（#41 补丁：枚举守卫原先漏掉了它）。
+    lifecycle = 文档处于哪个阶段：想法/草稿/进行中/审核中/已发布/已归档。
+
+    逻辑：
+        1. 已是标准 key（idea/draft/in_progress/review/published/archived）→ 原样返回
+        2. 查 FUZZY_FACET_MAPPING["lifecycle"]（中文/英文变体 → 标准 key）
+        3. 子串兜底：标准 key 的中文标签（如 "已发布" in "已发布的状态"）
+        4. 都不中 → fallback 默认值（published）
+
+    返回标准 key，绝不抛异常、绝不写入非法值。
+    """
+    from config.classifications import LIFECYCLE_STAGES
+    if not value:
+        return default
+    v = str(value).strip()
+    # 1. 已是标准 key
+    if v in LIFECYCLE_STAGES:
+        return v
+    # 2. 模糊映射（中文/英文变体）
+    mapped = _fuzzy(v, FUZZY_FACET_MAPPING.get("lifecycle", {}))
+    if mapped and mapped in LIFECYCLE_STAGES:
+        return mapped
+    # 3. 子串兜底（标准 key 的中文标签）
+    for k, label in LIFECYCLE_STAGES.items():
+        if k in v or v in label or label in v:
+            return k
+    return default

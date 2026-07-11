@@ -30,10 +30,10 @@ def detect_encoding(file_path: str, sample_size: int = 10000) -> str:
     if not raw:
         return "utf-8"  # 空文件，默认 UTF-8
 
-    # 先试 chardet（如果已安装）
+    # 先试 charset_normalizer（如果已安装）
     try:
-        import chardet
-        result = chardet.detect(raw)
+        from charset_normalizer import detect as chardet_detect
+        result = chardet_detect(raw)
         enc = result.get("encoding", "").strip().lower()
         conf = result.get("confidence", 0)
         if enc and conf >= 0.6:

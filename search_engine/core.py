@@ -232,7 +232,6 @@ def search(
             "total_chunks":    payload.get("total_chunks", 0),
             "doc_id":          payload.get("doc_id", ""),
             "content_hash":    payload.get("content_hash", ""),
-            "doc_uid":        payload.get("doc_uid", ""),
             "images":          payload.get("images", []),
             "content_type":    payload.get("content_type", "knowledge"),
             "domain":          payload.get("domain", []),
@@ -263,6 +262,10 @@ def search(
             "confidence":      payload.get("confidence", None),
             "field_sources":   payload.get("field_sources", {}),
             "rerank_score":   r.get("rerank_score", None),
+            # 书库位置指针（章节 / 段落）——供搜索卡片显示「第X章·标题·第N段」
+            "chapter_index":   payload.get("chapter_index", 0),
+            "chapter_title":   payload.get("chapter_title", ""),
+            "chunk_in_chapter":payload.get("chunk_in_chapter", 0),
         })
 
     # ── v0.8.0 / Q1 fix: 按 doc_id 分组，每文档保留 Top-N chunks ──

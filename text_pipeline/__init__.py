@@ -48,6 +48,7 @@ from .chunk import (
     _chunk_text,
     _text_hash,
     _extract_images,
+    chunk_text_with_positions,
 )
 
 

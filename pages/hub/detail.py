@@ -11,8 +11,8 @@ from utils.ui_shared import build_left_drawer
 from utils.activity_log import log_activity
 # ═══════════════════════════════════════════
 
-@ui.page("/doc/{doc_uid}")
-def page_doc_detail(doc_uid: str):
+@ui.page("/doc/{doc_id}")
+def page_doc_detail(doc_id: str):
     """文档详情页 — 28 字段完整展示 + 分块列表 + 来源追踪。"""
 
     build_left_drawer(active_page="hub")
@@ -28,13 +28,13 @@ def page_doc_detail(doc_uid: str):
 
         # 加载文档元数据与分块（单次查询）
         collection = STATE["active_collection"]
-        chunk_result = kb_query.get_document(doc_uid, collection=collection)
+        chunk_result = kb_query.get_document(doc_id, collection=collection)
         chunks = chunk_result.get("chunks", []) if chunk_result.get("ok") else []
         doc_meta = chunk_result.get("metadata", {}) if chunk_result.get("ok") else {}
 
         if not doc_meta:
             ui.markdown("### 📄 文档不存在")
-            ui.label(f"未找到 doc_uid={doc_uid} 的记录，可能已被删除。").classes("text-gray-500")
+            ui.label(f"未找到 doc_id={doc_id} 的记录，可能已被删除。").classes("text-gray-500")
             return
 
         # ════════════════════
@@ -113,11 +113,11 @@ def page_doc_detail(doc_uid: str):
                 try:
                     result = await asyncio.to_thread(
                         kb_query.delete_document,
-                        doc_uid,
+                        doc_id,
                         collection=collection,
                     )
                     if result.get("ok"):
-                        log_activity("delete", doc_uid, title, collection)
+                        log_activity("delete", doc_id, title, collection)
                         ui.notify("✅ 已删除", type="positive")
                         ui.run_javascript("window.location.href='/hub'")
                     else:

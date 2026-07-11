@@ -139,7 +139,7 @@ def page_manage():
             doc_list.clear()
             with doc_list:
                 for d in res.get("documents", []):
-                    uid = d.get("doc_uid", "")
+                    uid = d.get("doc_id") or d.get("doc_uid", "")
                     title = d.get("title", "") or d.get("source", "未知")
                     ct = d.get("content_type", "")
                     domains = ", ".join(d.get("domain", []))

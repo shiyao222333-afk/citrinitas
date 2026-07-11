@@ -89,12 +89,12 @@ def extract_auto_metadata(file_path: str, file_info: dict = None) -> dict:
 def _metadata_epub(file_path: str) -> dict:
     """从 EPUB 提取 Dublin Core 元数据"""
     try:
-        from ebooklib import epub
+        from .epub_reader import read_epub
     except ImportError:
         return {}
 
     try:
-        book = epub.read_epub(file_path)
+        book = read_epub(file_path)
     except Exception as e:
         logger.debug(f"[FileHandler] EPUB 元数据读取失败: {e}")
         return {}

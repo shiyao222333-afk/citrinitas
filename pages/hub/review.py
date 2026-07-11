@@ -1,5 +1,10 @@
 """
-待审核标签 — 审核队列 UI。
+待审核标签 — 审核队列 UI（人在这里给 AI 不确定的文档"放行"或"丢弃"）。
+
+【小白导读】
+  AI 给文档打标签/分类时如果没把握，会把文档丢进"待审核队列"。
+  这个页面把队列里的文档一条条列出来，点"通过并入库"=确认没问题正式收下；
+  点"丢弃"=不要这篇。通过后会把文档的"待审核"标记关掉。
 """
 
 import asyncio
@@ -45,7 +50,7 @@ async def _build_review_tab():
 
 def _build_review_card(doc: dict, on_refresh):
     """渲染单个待审核文档卡片。"""
-    doc_uid = doc.get("doc_uid", "?")
+    doc_uid = doc.get("doc_id") or doc.get("doc_uid", "?")
     title = doc.get("title") or "未命名"
     source = doc.get("source") or doc.get("source_path") or "手动输入"
     confidence = doc.get("overall_confidence", 0)
@@ -77,6 +82,7 @@ def _build_review_card(doc: dict, on_refresh):
             # 通过按钮 — 使用工厂函数避免闭包捕获问题
             async def _approve():
                 try:
+                    # 通过：把这篇文档的"待审核"标记关掉，正式入库（更新它所有分块）
                     await asyncio.to_thread(
                         kb_query.update_metadata,
                         doc_uid,

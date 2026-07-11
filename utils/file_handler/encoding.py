@@ -28,10 +28,10 @@ def detect_encoding(file_path: str, sample_bytes: int = 4096) -> str:
     except Exception:
         return "utf-8"  # 兜底
 
-    # 尝试 chardet（可选依赖，未安装则跳过）
+    # 尝试 charset_normalizer（MIT 许可，可选依赖，未安装则跳过）
     try:
-        import chardet
-        detected = chardet.detect(raw)
+        from charset_normalizer import detect as chardet_detect
+        detected = chardet_detect(raw)
         if detected and detected.get("encoding"):
             enc = detected["encoding"].lower()
             # 统一常见别名

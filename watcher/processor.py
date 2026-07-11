@@ -8,6 +8,7 @@ Citrinitas Watch Folder — 文件处理管线。
 import os
 import time
 import threading
+import shutil
 from queue import Full
 
 import requests
@@ -27,7 +28,7 @@ from text_pipeline import (
     extract_text as _extract_text,
 )
 from classify_pipeline import classify_document, route_by_confidence
-from qconst import CONFIDENCE_LOW, CONFIDENCE_HIGH
+from qconst import CONFIDENCE_LOW, CONFIDENCE_HIGH, BOOKS_DIR
 from utils.activity_log import log_activity
 from services.ingest_service import ingest
 
@@ -42,9 +43,13 @@ from watcher.utils import (
 from watcher.failures import _handle_failure, _classify_failure
 
 
+# 书类文件扩展名（按格式判定归档，不依赖分类猜测）。单一真相源，供归档 / 保留 / 重复跳过共用。
+BOOK_EXTS = {".epub", ".pdf", ".docx", ".pptx"}
+
+
 # ═══════════════════════════════════════════
 # WLNK 多页决策
-# ═══════════════════════════════════════════
+# ═════════════════════════════════════════════
 
 def decide_file_retention(page_analyses: list[dict]) -> dict:
     """
@@ -307,6 +312,7 @@ def _do_ingest(full_text: str, metadata: dict, field_sources: dict,
             collection="athanor_v1",
             field_sources=field_sources,
             overall_confidence=overall_conf,
+            file_path=filepath,   # 传入永久源路径：保证 doc_id 确定性 + 详情页 source_path 可见
         )
     except (requests.RequestException, ValueError) as e:
         result = _handle_failure(filepath, filename, "ingest", str(e), retry_count)
@@ -324,10 +330,12 @@ def _do_ingest(full_text: str, metadata: dict, field_sources: dict,
             )
             _append_state({"file": filename, "state": "done"})
             with _stats_lock: _watch_stats["processed"] += 1
-            try:
-                os.remove(filepath)
-            except OSError:
-                pass
+            # 书类文件已归档至 library/books/ 永久保留，重复跳过时不得删除永久源
+            if os.path.splitext(filepath)[1].lower() not in BOOK_EXTS:
+                try:
+                    os.remove(filepath)
+                except OSError:
+                    pass
             return ingest_result, False, retry_count
         result = _handle_failure(filepath, filename, "ingest", error_msg, retry_count)
         if result == "retry":
@@ -356,10 +364,18 @@ def _do_post_ingest(filepath: str, filename: str, retention: dict,
         })
         with _stats_lock: _watch_stats["needs_review"] += 1
 
+    # 书类文件（epub/pdf/docx/pptx）已归档到 library/books/，永不删除源文件
+    _ext = os.path.splitext(filepath)[1].lower()
     if retention["keep_file"]:
         log_activity(
             action="watch_kept",
             detail=f"保留原文件: {retention['reason']}",
+            source=filename,
+        )
+    elif _ext in BOOK_EXTS:
+        log_activity(
+            action="watch_book_kept",
+            detail=f"书类文件已永久保留于 library/books/: {filename}",
             source=filename,
         )
     else:
@@ -409,6 +425,30 @@ def _process_file(filepath: str, cancel_event: threading.Event = None):
 
     filename = os.path.basename(filepath)
     ext = os.path.splitext(filename)[1].lower()
+
+    # ── 书类文件（按格式触发，不靠分类猜测）：摄入前先归档到 library/books/ 永久保留 ──
+    # 这样 source_path 自然指向永久源文件，且后续永不删除原件。
+    if ext in BOOK_EXTS:
+        try:
+            os.makedirs(BOOKS_DIR, exist_ok=True)
+            dest = os.path.join(BOOKS_DIR, filename)
+            if os.path.abspath(filepath) != os.path.abspath(dest):
+                if os.path.exists(dest):
+                    os.remove(dest)  # 重录入场景：覆盖旧归档
+                shutil.move(filepath, dest)
+                filepath = dest
+                log_activity(
+                    action="watch_book_archived",
+                    detail=f"书类文件已归档至 library/books/: {filename}",
+                    source=filename,
+                )
+        except OSError as e:
+            log_activity(
+                action="watch_book_archive_failed",
+                detail=f"归档书类文件失败，仍按原路径处理: {e}",
+                source=filename,
+            )
+
     with _stats_lock: _watch_stats["infra_ok"] = True
     retry_count = 0
     max_retries = WATCH_V2_MAX_AUTO_RETRIES

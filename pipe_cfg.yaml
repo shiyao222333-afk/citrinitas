@@ -21,8 +21,8 @@ confidence:
   high: 0.75
 table_split_threshold: 4
 watch_v2:
-  inbox_dir: data/inbox
-  state_file: data/file_state.jsonl
+  inbox_dir: library/inbox
+  state_file: library/file_state.jsonl
   write_complete_checks: 2
   write_check_interval: 0.5
   max_file_size_mb: 50

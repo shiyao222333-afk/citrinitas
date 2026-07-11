@@ -4,12 +4,103 @@
 
 import os
 import re
+import hashlib
 import logging
+import urllib.parse
 
 logger = logging.getLogger(__name__)
 
 from .registry import detect_file_type
 from .encoding import _read_text_with_fallback
+
+
+# ── 书籍内嵌图抽存 helper（#22：保留章节 + 抽出内嵌图，不 OCR，原图直存）──
+
+def _safe_name(name: str) -> str:
+    """把任意文件名清洗成安全文件名（去非法字符、截断过长）。"""
+    name = re.sub(r'[\\/:*?"<>|]', "_", name).strip().strip(".")
+    if not name:
+        name = "image"
+    return name[:120]
+
+
+def _save_book_image(book_stem: str, name: str, data: bytes) -> str | None:
+    """
+    把书籍内嵌图原图直存到 library/images/books/<书名>/ 下。
+
+    返回相对项目根的路径（如 library/images/books/LangChain/cover.jpg），
+    供正文插入 [image:相对路径] 引用；失败返回 None（调用方跳过该图）。
+    """
+    try:
+        from qconst import IMAGES_DIR, PROJECT_DIR
+        sub = os.path.join(IMAGES_DIR, "books", _safe_name(book_stem))
+        os.makedirs(sub, exist_ok=True)
+        fname = _safe_name(name)
+        dest = os.path.join(sub, fname)
+        # 同名冲突但内容不同 → 加内容短哈希区分，避免覆盖
+        if os.path.exists(dest) and hashlib.md5(data).hexdigest()[:8] != _file_md5(dest):
+            base, ext = os.path.splitext(fname)
+            dest = os.path.join(sub, f"{base}_{hashlib.md5(data).hexdigest()[:8]}{ext}")
+        with open(dest, "wb") as f:
+            f.write(data)
+        # 统一正斜杠，保证跨平台一致且搜索卡片显示干净
+        return os.path.relpath(dest, PROJECT_DIR).replace(os.sep, "/")
+    except Exception as e:
+        logger.warning(f"书籍图片保存失败（已跳过该图）: {e}")
+        return None
+
+
+def _file_md5(path: str) -> str:
+    try:
+        with open(path, "rb") as f:
+            return hashlib.md5(f.read()).hexdigest()[:8]
+    except Exception:
+        return ""
+
+
+def _norm_href(href: str) -> str:
+    """EPUB 图片 href 归一化：去 #fragment + URL 解码，用于相对路径匹配。"""
+    return urllib.parse.unquote(href.split("#")[0]).strip()
+
+
+def _soup_to_structured_text(soup, book_stem: str, image_refs: list,
+                             image_resolver=None) -> str:
+    """
+    把 BeautifulSoup 章节节点转成「保留标题层级 + 图片引用」的纯文本。
+
+    - h1-h6 → Markdown 标题（# 到 ######）
+    - img    → 抽原图存盘并插入 [image:相对路径]（不 OCR）
+    - 其余块级元素 → 保留纯文本
+    image_resolver: 可选回调(src, soup) -> bytes，用于 EPUB 把相对 src 解析为图片字节
+    """
+    out = []
+    for elem in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "img",
+                               "figure", "li", "blockquote", "pre", "table"]):
+        tag = elem.name
+        if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            level = int(tag[1])
+            title = elem.get_text(strip=True)
+            if title:
+                out.append("#" * level + " " + title)
+        elif tag == "img":
+            src = elem.get("src") or elem.get("xlink:href")
+            if src and not src.startswith("data:"):
+                data = None
+                if image_resolver:
+                    try:
+                        data = image_resolver(src, elem)
+                    except Exception as e:
+                        logger.warning(f"EPUB 图片解析失败 {src}: {e}")
+                if data:
+                    ref = _save_book_image(book_stem, os.path.basename(src) or "img", data)
+                    if ref:
+                        image_refs.append(ref)
+                        out.append(f"[image:{ref}]")
+        else:
+            t = elem.get_text(separator="\n", strip=True)
+            if t:
+                out.append(t)
+    return "\n".join(out)
 
 
 def extract_text(file_path: str, file_info: dict = None) -> dict:
@@ -109,15 +200,54 @@ def _extract_srt(file_path: str) -> dict:
 
 
 def _extract_docx(file_path: str) -> dict:
-    """Word 文档（.docx）"""
+    """Word 文档（.docx）：保留标题层级 + 抽出内嵌图（不 OCR，原图直存）"""
     try:
         import docx
-        doc = docx.Document(file_path)
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        text = "\n".join(paragraphs)
-        return {"ok": True, "text": text, "error": None}
     except ImportError:
         return {"ok": False, "text": "", "error": "请安装 python-docx: pip install python-docx"}
+    try:
+        doc = docx.Document(file_path)
+    except Exception as e:
+        return {"ok": False, "text": "", "error": f"DOCX 读取失败: {e}"}
+
+    book_stem = os.path.splitext(os.path.basename(file_path))[0]
+    lines = []
+    image_refs = []
+
+    # 正文：标题按级别转 Markdown #，其余段落保留
+    for p in doc.paragraphs:
+        text = p.text.strip()
+        style = (p.style.name or "") if p.style else ""
+        m = re.match(r"Heading\s+(\d+)", style)
+        if m and text:
+            lines.append("#" * int(m.group(1)) + " " + text)
+        elif text:
+            lines.append(text)
+
+    # 内嵌图：统一抽到文末「插图」区（位置近似，不丢图）
+    try:
+        for i, shape in enumerate(doc.inline_shapes, 1):
+            try:
+                blip = shape._inline.graphic.graphicData.pic.blipFill.blip
+                rId = blip.embed
+                image_part = doc.part.related_parts[rId]
+                ref = _save_book_image(book_stem, f"image_{i}.png", image_part.blob)
+                if ref:
+                    image_refs.append(ref)
+            except Exception as e:
+                logger.warning(f"DOCX 图片抽取失败（跳过）: {e}")
+    except Exception as e:
+        logger.warning(f"DOCX 图片遍历失败: {e}")
+
+    if image_refs:
+        lines.append("")
+        lines.append("## 插图")
+        lines.extend(f"[image:{r}]" for r in image_refs)
+
+    text = "\n".join(lines)
+    if not text.strip():
+        return {"ok": False, "text": "", "error": "未能从 DOCX 中提取到文本内容"}
+    return {"ok": True, "text": text, "error": None, "images": image_refs}
 
 
 def _extract_pptx(file_path: str) -> dict:
@@ -162,45 +292,56 @@ def _extract_html(file_path: str) -> dict:
 
 
 def _extract_epub(file_path: str) -> dict:
-    """EPUB 电子书：提取文本内容"""
+    """EPUB 电子书：保留章节结构（标题层级）+ 抽出内嵌图（不 OCR，原图直存）"""
     try:
-        import ebooklib
-        from ebooklib import epub
         from bs4 import BeautifulSoup
     except ImportError:
-        missing = []
-        try:
-            import ebooklib  # noqa: F811
-        except ImportError:
-            missing.append("ebooklib")
-        try:
-            from bs4 import BeautifulSoup  # noqa: F811
-        except ImportError:
-            missing.append("beautifulsoup4")
-        return {"ok": False, "text": "",
-                "error": f"请安装缺少的库: pip install {' '.join(missing)}"}
+        return {"ok": False, "text": "", "error": "请安装缺少的库: pip install beautifulsoup4"}
+    from .epub_reader import read_epub, ITEM_IMAGE, ITEM_DOCUMENT
 
     try:
-        book = epub.read_epub(file_path)
+        book = read_epub(file_path)
     except Exception as e:
         return {"ok": False, "text": "", "error": f"EPUB 读取失败: {e}"}
 
-    chapters = []
-    for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+    # 建图片 href 映射（归一化后用于相对路径解析）
+    image_map = {}
+    for it in book.get_items_of_type(ITEM_IMAGE):
         try:
-            soup = BeautifulSoup(item.get_content(), "html.parser")
-            chapter_text = soup.get_text(separator="\n")
-            lines = [line.strip() for line in chapter_text.split("\n") if line.strip()]
-            if lines:
-                chapters.append("\n".join(lines))
+            image_map[_norm_href(it.file_name)] = it
         except Exception:
             continue
 
-    text = "\n\n".join(chapters)
-    if not text:
+    book_stem = os.path.splitext(os.path.basename(file_path))[0]
+    chapters = []
+    image_refs = []
+
+    for item in book.get_items_of_type(ITEM_DOCUMENT):
+        try:
+            soup = BeautifulSoup(item.get_content(), "html.parser")
+            for tag in soup(["script", "style"]):
+                tag.decompose()
+            base_href = item.file_name
+
+            # 把相对 src 解析为图片字节
+            def _resolver(src, _elem, _base=base_href, _map=image_map):
+                rel = urllib.parse.urljoin(_base, src)
+                target = _map.get(_norm_href(rel))
+                if target is None:
+                    return None
+                return target.get_content()
+
+            block = _soup_to_structured_text(soup, book_stem, image_refs, _resolver)
+            if block.strip():
+                chapters.append(block)
+        except Exception:
+            continue
+
+    if not chapters:
         return {"ok": False, "text": "",
                 "error": "未能从 EPUB 中提取到文本内容"}
-    return {"ok": True, "text": text, "error": None}
+    text = "\n\n".join(chapters)
+    return {"ok": True, "text": text, "error": None, "images": image_refs}
 
 
 def _extract_pdf(file_path: str) -> dict:
@@ -224,15 +365,29 @@ def _extract_pdf(file_path: str) -> dict:
     except Exception as e:
         return {"ok": False, "text": "", "error": f"PDF 文件无法打开: {e}"}
 
-    # 提取所有页的文本
+    # 提取所有页的文本 + 内嵌图（原图直存，不 OCR）
+    book_stem = os.path.splitext(os.path.basename(file_path))[0]
     pages_text = []
+    image_refs = []
     for i, page in enumerate(reader.pages):
         try:
-            pt = page.extract_text()
-            if pt and pt.strip():
-                pages_text.append(pt.strip())
+            pt = page.extract_text() or ""
         except Exception:
-            continue
+            pt = ""
+        # 抽该页图片
+        try:
+            for img in page.images:
+                data = getattr(img, "data", None)
+                if data:
+                    name = getattr(img, "name", f"page{i+1}_img") or f"page{i+1}_img"
+                    ref = _save_book_image(book_stem, name, data)
+                    if ref:
+                        image_refs.append(ref)
+                        pt = (pt + f"\n\n[image:{ref}]").strip()
+        except Exception as e:
+            logger.warning(f"PDF 第{i+1}页图片抽取失败（跳过）: {e}")
+        if pt and pt.strip():
+            pages_text.append(f"--- 第 {i+1} 页 ---\n" + pt.strip())
 
     text = "\n\n".join(pages_text)
 
@@ -243,6 +398,7 @@ def _extract_pdf(file_path: str) -> dict:
             "ok": True,
             "text": text or "",
             "error": None,
+            "images": image_refs,
             "warning": "此 PDF 文字层很少，可能是扫描版，建议使用 OCR 识别。",
             "ocr_recommended": True,
             "total_pages": len(reader.pages),
@@ -253,6 +409,7 @@ def _extract_pdf(file_path: str) -> dict:
         "ok": True,
         "text": text,
         "error": None,
+        "images": image_refs,
         "total_pages": len(reader.pages),
         "has_text_layer": bool(text.strip()),
     }

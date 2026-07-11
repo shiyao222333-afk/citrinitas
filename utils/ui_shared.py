@@ -217,6 +217,7 @@ def build_left_drawer(active_page: str = ""):
             ui.link("📚 知识库管理", "/hub").classes(_nav_class(("hub", "manage")))
             # 文档管理（知识库管理的子页面，缩进展示）
             ui.link("↳ 📄 文档管理", "/manage").classes(_nav_class("manage") + " q-ml-md")
+            ui.link("📖 受控词表", "/vocab").classes(_nav_class("vocab"))
             ui.link("⚙️ 设置", "/config").classes(_nav_class("config"))
 
         ui.separator()
@@ -253,6 +254,14 @@ def render_chunk_card(c: dict, idx: int):
             ui.label(f"🏷️ {', '.join(c.get('domain', []))}").classes("text-xs text-gray-400")
             ui.label(f"✅ {c.get('epistemic_status', 'N/A')}").classes("text-xs text-gray-400")
             ui.label(f"⏱️ {c.get('temporal_nature', 'N/A')}").classes("text-xs text-gray-500")
+
+        # 书库位置指针（章节 / 段落）——仅书籍类内容有 chapter_title
+        _chap_idx = c.get("chapter_index", 0) or 0
+        _chap_title = (c.get("chapter_title", "") or "").strip()
+        _chunk_in = c.get("chunk_in_chapter", 0) or 0
+        if _chap_title:
+            with ui.row().classes("items-center gap-2 mt-1"):
+                ui.label(f"📖 第{_chap_idx + 1}章 · {_chap_title} · 第{_chunk_in}段").classes("text-xs text-purple-400")
 
         # 来源文件信息 + 打开按钮
         source = c.get("source", "")

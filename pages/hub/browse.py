@@ -204,7 +204,7 @@ async def _build_browse_tab():
 def _build_doc_card(doc: dict, idx: int, selected_ids: set, on_refresh, on_selection_change=None):
     """渲染单个文档卡片（浏览标签页用）。"""
     title = doc.get("title") or doc.get("source") or "未知"
-    doc_uid = doc.get("doc_uid", "")
+    doc_uid = doc.get("doc_id") or doc.get("doc_uid", "")
     content_type = doc.get("content_type", "?")
     domain = doc.get("domain", [])
     temporal = doc.get("temporal_nature", "")
@@ -257,7 +257,7 @@ def _build_doc_card(doc: dict, idx: int, selected_ids: set, on_refresh, on_selec
 def _show_doc_quickview(doc: dict):
     """文档快览弹窗 — 精简信息 + 跳转完整档案入口。"""
     title = doc.get("title") or doc.get("source") or "未知"
-    doc_uid = doc.get("doc_uid", "")
+    doc_uid = doc.get("doc_id") or doc.get("doc_uid", "")
     content_type = doc.get("content_type", "?")
     domain = doc.get("domain", [])
     temporal = doc.get("temporal_nature", "")

@@ -1,5 +1,37 @@
 """
-Ingest Pipeline — Qdrant payload builder.
+Ingest Pipeline — Qdrant payload builder（入库组装线）.
+
+【小白导读 · 这个文件干嘛的？】
+  一份文件要进知识库，得先被切小块、每块变成数字向量。这个文件负责把
+  "小块文字 + 它的向量 + 标签"拼成一格格知识库能存的数据（叫 point / 点位）。
+  关键概念：分块(chunk)=长文件切的小段；点位(point)=知识库最小一格；
+  doc_id=每份文件的身份证号（同一文件永远同一个号 → 重放=更新，不堆重复）。
+  术语不懂看 docs/GLOSSARY.md。
+
+  build_payloads 的"组装线"一步一步（对应 FLOWCHART 的"入库"主流程节点）：
+    1. _derive_doc_id：算出这份文件的身份证号。有文件路径就用路径算（同名文件=更新）；
+       没有（纯文本/粘贴/死信重传/OCR）就用正文内容哈希算（相同内容永远同号）。
+    2. _prepare_metadata：把上游（AI 分析 / 用户填写）给的一堆字段，整理成统一的字典。
+       —— 这里会先过一遍"枚举守卫"(normalize_facet_values) 和生命周期归一
+          (normalize_lifecycle)，把 AI 写偏的类别纠正回标准词。
+    3. normalize_free_text_fields（受控词表校验，#28/#37 挂载点）：
+       把 tags/keywords/udc_code 对照词表归一，未受控的打 needs_review 标记。
+       这是"两条摄入路线唯一汇合点"上的关键一步——守望夹和网页上传都从这儿过。
+    4. 调试开关（#44）：若系统配置页打开了"强制所有摄入进待审核"，这里直接把
+       needs_review 置 True。因为挂在 build_payloads，开关对所有来源一次性生效。
+    5. _build_point：把"文字块 + 向量 + 元数据"拼成 Qdrant 的一个点位。
+       —— 点位号(_derive_point_id)由 (doc_id, 第几块) 算出，重录入时 upsert 覆盖旧点位。
+       —— 元数据里哪些字段写进 payload、扩展槽只写有值的，都在这儿定。
+    6. 返回 {ok, points, doc_id, ...}，交给 kb_query.ingest() 去写 Qdrant。
+
+  诚实的存疑点：
+  - 第 1 步"路径即身份"对书类文件成立（书处理后稳定落在 library/books/，文件名唯一），
+    但理论上若用户移动/重命名源文件，doc_id 会变 → 被视为"新文件"而非"更新"。
+    目前没遇到，但这是个潜在 edge case，也许将来该用内容哈希做更稳的身份。
+  - _prepare_metadata 里把 base_meta 几乎原样透传成几十个字段，函数偏长。
+    当时这样写是为了"一处看全字段"，但确实不够优雅；若要重构，可能按分组拆成几个小函数。
+  - 扩展槽(ext_text/num/bool/date 1~3)的透传用了一串近乎重复的循环——能抽成一个 helper，
+    只是当时为了"看得清每个槽"故意展开了，未必是最优写法。
 
 Extracted from kb_query.py (v0.7.0 B1 refactor).
 
@@ -7,12 +39,44 @@ Extracted from kb_query.py (v0.7.0 B1 refactor).
   build_payloads() — 将文本/块/向量/元数据组装为 Qdrant points 列表
   不负责: 文本提取、分块、嵌入计算、Qdrant 写入（由 kb_query.ingest() 协调）
 """
+import hashlib
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
 from text_pipeline import _text_hash, _detect_language
-from config.classifications import normalize_facet_values
+from config.normalize import normalize_facet_values, normalize_lifecycle
+from vocabulary import normalize_free_text_fields  # #28 受控词表校验（#37 挂载点）
+from config.settings import is_force_review_all  # 调试开关：强制所有摄入进待审核
+
+
+def _derive_doc_id(file_path: str = None, text: str = None) -> str:
+    """确定性文档编号：同一源 → 同一 doc_id，支撑重录入去重与覆盖更新。
+
+    - 有文件路径：基于归一化完整路径（书类处理后稳定落在 library/books/，
+      文件名唯一）→ 路径即身份，替换同名文件即「更新」而非新增。
+    - 无文件路径（纯文本/粘贴/死信重传/OCR）：基于正文内容哈希 →
+      相同内容永远同一编号，使「强制重录」与「重传覆盖」在所有入口生效。
+    - 两者皆无：退回随机（兜底，正常流程不会走到）。
+    """
+    # 有文件路径 → 用路径算号（同一文件永远同一个号）
+    if file_path:
+        norm = os.path.normpath(file_path).replace("\\", "/")
+        return "doc_" + hashlib.sha256(norm.encode("utf-8")).hexdigest()[:16]
+    if text is not None and text.strip():
+        return "doc_" + hashlib.sha256(text.strip().encode("utf-8")).hexdigest()[:16]
+    return "doc_" + uuid.uuid4().hex[:16]
+
+
+def _derive_point_id(doc_id: str, chunk_index: int) -> int:
+    """确定性点编号：由 (doc_id, 块序号) 派生，使重录入时 upsert 覆盖旧点而非重复堆积。
+
+    落在 [0, 2^64) 区间，与 Qdrant 数值型 point id 兼容；碰撞概率约 1/2^64，可忽略。
+    """
+    # 由(文档号,第几块)算出点位号 → 重录入时覆盖旧点位，不堆重复
+    seed = f"{doc_id}#{chunk_index}".encode("utf-8")
+    return int(hashlib.sha256(seed).hexdigest(), 16) & ((1 << 64) - 1)
 
 
 def _prepare_metadata(base_meta: dict, text: str, source: str, file_path: str) -> dict:
@@ -45,8 +109,8 @@ def _prepare_metadata(base_meta: dict, text: str, source: str, file_path: str) -
         "domain":          facet_norm["domain"] if isinstance(facet_norm["domain"], list) else [facet_norm["domain"]],
         "temporal_nature": facet_norm["temporal_nature"],
         "epistemic_status": facet_norm["epistemic_status"],
-        # 生命周期
-        "lifecycle":      base_meta.get("lifecycle", "published"),
+        # 生命周期（#41：经枚举守卫归一，避免 AI 写出"草稿中"等花样）
+        "lifecycle":      normalize_lifecycle(base_meta.get("lifecycle", "published")),
         "project_source":  base_meta.get("project_source", ""),
         "udc_code":        base_meta.get("udc_code", ""),
         # 知识管理
@@ -103,10 +167,12 @@ def _prepare_metadata(base_meta: dict, text: str, source: str, file_path: str) -
 
 def _build_point(chunk: str, vec: list, i: int, total_chunks: int,
                 doc_id: str, full_text_hash: str, metadata: dict,
-                sparse_vec: Optional[tuple] = None) -> dict:
+                sparse_vec: Optional[tuple] = None,
+                position: Optional[dict] = None) -> dict:
     """构建单个 Qdrant point。"""
-    point_id = uuid.uuid4().int >> 64
+    point_id = _derive_point_id(doc_id, i)
     m = metadata  # 简写
+    pos = position or {}
 
     payload = {
         "text": chunk,
@@ -114,8 +180,11 @@ def _build_point(chunk: str, vec: list, i: int, total_chunks: int,
         "source": m.get("source", "unknown"),
         "chunk_index": i,
         "total_chunks": total_chunks,
+        # 书库位置指针（无章节文本时为默认值）
+        "chapter_index": pos.get("chapter_index", 0),
+        "chapter_title": pos.get("chapter_title", ""),
+        "chunk_in_chapter": pos.get("chunk_in_chapter", i + 1),
         "doc_id": doc_id,
-        "doc_uid": doc_id,
         "content_hash": full_text_hash,
         "images": m["valid_images"],
         # 分面
@@ -202,6 +271,7 @@ def build_payloads(
     file_path: str = "",
     source: str = "unknown",
     model: str = "",
+    chunk_positions: Optional[list] = None,
 ) -> dict:
     """
     构建 Qdrant points 列表（含完整 payload）。
@@ -220,12 +290,21 @@ def build_payloads(
          "content_hash": "...", "valid_images": [...], "ingested_at": "..."}
     """
     base_meta = base_meta or {}
-    doc_id = base_meta.get("doc_id") or str(uuid.uuid4())
+    doc_id = base_meta.get("doc_id") or _derive_doc_id(file_path, text)
     ingested_at = datetime.now(timezone.utc).isoformat()
     full_text_hash = _text_hash(text)
 
     # 准备元数据（注入 ingested_at）
     metadata = _prepare_metadata(base_meta, text, source, file_path)
+    # #28 受控词表校验（#37 挂载点）：udc_code/tags/keywords 归一化，
+    # 任一字段存在未受控值 → metadata["needs_review"]=True → 进「待审核」队列。
+    # 此挂载点在 build_payloads 内、两条摄入路线（守望夹 + UI 上传）唯一汇合处，
+    # 故一处接入同时覆盖两者；doc_id 用于日志定位。
+    # 关键一步：把 AI 标签对照词表归一（不在表里的进待审核队列）
+    normalize_free_text_fields(metadata, doc_id)
+    # 调试开关：开启后强制所有摄入文件进待审核队列（build_payloads 是两条摄入路线唯一汇合点，一处接入全覆盖）
+    if is_force_review_all():
+        metadata["needs_review"] = True
     metadata["ingested_at"] = ingested_at
     metadata["source"] = source
 
@@ -235,8 +314,11 @@ def build_payloads(
         sparse_vec = None
         if sparse_vectors and i < len(sparse_vectors):
             sparse_vec = sparse_vectors[i]
+        pos = None
+        if chunk_positions and i < len(chunk_positions):
+            pos = chunk_positions[i]
         point = _build_point(
-            chunk, vec, i, len(chunks), doc_id, full_text_hash, metadata, sparse_vec
+            chunk, vec, i, len(chunks), doc_id, full_text_hash, metadata, sparse_vec, pos
         )
         points.append(point)
 

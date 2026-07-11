@@ -146,6 +146,7 @@ def _show_dlq_edit_dialog(item: dict, refresh_callback):
                         collection=STATE["active_collection"],
                         field_sources={k: "user" for k in new_meta},
                         overall_confidence=1.0,  # 手动修正，置信度设为1
+                        force_reingest=True,    # 死信重传默认强制（绕过重复拦截 + 清理旧点）
                     )
                     if result.get("ok"):
                         _delete_dlq_file(fp)

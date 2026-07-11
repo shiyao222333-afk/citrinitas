@@ -382,6 +382,11 @@ def page_ingest():
 
         ui.separator()
 
+        # ── 强制重录开关（#27：忽略重复检测并覆盖已有相同内容）──
+        force_checkbox = ui.checkbox(
+            "♻️ 强制重录（忽略重复检测，覆盖已存在的相同内容）"
+        ).classes("mt-2 text-sm")
+
         # ── 摄入按钮 ──
         async def do_ingest():
             nonlocal ingest_content, ingest_method, ingest_source
@@ -461,6 +466,7 @@ def page_ingest():
                     collection=STATE["active_collection"],
                     field_sources=field_sources,
                     overall_confidence=overall_conf,
+                    force_reingest=bool(force_checkbox.value),
                 )
                 if result.get("ok"):
                     ui.notify(f"✅ 摄入成功！({result.get('chunks', '?')} 块, 置信度 {overall_conf:.0%})", type="positive")

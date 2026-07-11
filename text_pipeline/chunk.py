@@ -145,3 +145,72 @@ def _chunk_text(text: str, max_chars: int = None, overlap: int = None) -> list[s
         restored.append(chunk)
 
     return restored
+
+
+def _split_into_chapters(text: str) -> list[dict]:
+    """将文本按标题行切分为章节。无标题则视为单章节（index=0, title=\"\"）。
+
+    标题识别（两种，覆盖 #22 提取阶段产出的格式）:
+      - Markdown 标题: 行首 `#`~`######` 后跟标题文字
+      - 中文章节惯例: 行首「第X章/卷/部/篇/节/回」
+
+    约定: 标题行本身计入新章节首行（保留标题文字可被检索），
+    同时单独存入 chapter_title 字段供 UI 展示。
+    """
+    heading_pat = re.compile(r'^(#{1,6})\s+(.+?)\s*$')
+    cn_chapter_pat = re.compile(r'^第[一二三四五六七八九十百千0-9]+[章卷部篇节回]\b')
+    lines = text.split('\n')
+    chapters = []
+    cur = None
+    for raw in lines:
+        line = raw.strip()
+        m = heading_pat.match(line)
+        is_cn = bool(cn_chapter_pat.match(line))
+        if m or is_cn:
+            title = m.group(2).strip() if m else line
+            if cur is not None:
+                chapters.append(cur)
+            cur = {"index": len(chapters), "title": title, "content": raw + "\n"}
+        else:
+            if cur is None:
+                cur = {"index": 0, "title": "", "content": ""}
+            cur["content"] += raw + "\n"
+    if cur is not None:
+        chapters.append(cur)
+    # 丢弃完全空白的章节
+    chapters = [c for c in chapters if c["content"].strip()]
+    if not chapters:
+        chapters = [{"index": 0, "title": "", "content": text}]
+    return chapters
+
+
+def chunk_text_with_positions(text: str, max_chars: int = None, overlap: int = None) -> list[dict]:
+    """切块并记录位置指针（章节序号 / 章节标题 / 章内段序）。
+
+    返回 list[dict]，每元素:
+      {
+        "text":            str,    # 块正文（供嵌入/检索）
+        "chapter_index":   int,    # 第几章（从 0 起）
+        "chapter_title":   str,    # 该章标题（无则空串）
+        "chunk_in_chapter":int,    # 该章内第几段（从 1 起）
+      }
+
+    每章内部复用 _chunk_text 的原子保护逻辑（公式/表格/图片引用不被切断）。
+    无标题文本整体视为单章，所有块 chapter_index=0、chapter_title=\"\"。
+    """
+    if max_chars is None:
+        max_chars = CHUNK_MAX_CHARS
+    if overlap is None:
+        overlap = CHUNK_OVERLAP
+    chapters = _split_into_chapters(text)
+    result = []
+    for ch in chapters:
+        sub = _chunk_text(ch["content"], max_chars, overlap)
+        for j, sc in enumerate(sub, 1):
+            result.append({
+                "text": sc,
+                "chapter_index": ch["index"],
+                "chapter_title": ch["title"],
+                "chunk_in_chapter": j,
+            })
+    return result

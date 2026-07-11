@@ -17,7 +17,15 @@ QDRANT_URL = os.environ.get("KB_QDRANT_URL", "http://127.0.0.1:6333")
 if "localhost" in QDRANT_URL:
     QDRANT_URL = QDRANT_URL.replace("localhost", "127.0.0.1")
 DEFAULT_COLLECTION = "athanor_v1"
-IMAGES_DIR = os.path.join(PROJECT_DIR, "local_data", "images")
+
+# ── 知识库大文件夹 library/（源文件 / 图片 / 状态集中于此，单一根目录）──
+# 所有图片（书本插图 + OCR 抽取图）统一进 IMAGES_DIR，不分两处。
+LIBRARY_DIR     = os.path.join(PROJECT_DIR, "library")
+BOOKS_DIR       = os.path.join(LIBRARY_DIR, "books")            # 书籍源文件长期保留
+INBOX_DIR       = os.path.join(LIBRARY_DIR, "inbox")           # 待摄入文件（知识库前厅）
+IMAGES_DIR      = os.path.join(LIBRARY_DIR, "images")          # 所有图片统一一处
+FILE_STATE_PATH = os.path.join(LIBRARY_DIR, "file_state.jsonl")  # 已保存内容状态索引
+
 INGEST_LOG_PATH = os.path.join(PROJECT_DIR, "local_data", "ingest_log.jsonl")
 
 # ── 从 pipe_cfg.yaml + .env 统一导入调参项 ──

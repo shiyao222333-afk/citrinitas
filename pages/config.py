@@ -12,6 +12,8 @@ import kb_query
 from qconst import EMBED_MODEL, QDRANT_URL
 from utils.state import STATE
 from utils.ui_shared import build_left_drawer, EMBED_PRESETS
+from config.settings import is_force_review_all
+from utils.activity import log_activity
 
 # 嵌入模型预设（从 main.py 复制）
 
@@ -201,14 +203,36 @@ def page_config():
                     value=os.environ.get("KB_ROOT_PATH", os.path.join(PROJECT_DIR, "local_data")),
                 ).classes("w-full")
 
+                ui.separator()
+                ui.markdown("### 🐞 调试开关")
+                ui.markdown(
+                    "*开启后，**所有**新摄入的文件默认进入「待审核」队列（不论词表是否受控），"
+                    "方便你全量抽检摄入质量。关闭后恢复正常。开关动作会记入活动日志。*"
+                )
+                force_review = ui.switch(
+                    "强制所有摄入文件进待审核",
+                    value=is_force_review_all(),
+                )
+
                 def save_sys():
                     _save_env({
                         "KB_ROOT_PATH": kb_root.value or "",
                         "KB_CONFIDENCE_LOW": str(conf_low.value),
                         "KB_CONFIDENCE_HIGH": str(conf_high.value),
+                        # 调试开关：写 .env 持久化（下次重启也生效）
+                        "KB_FORCE_REVIEW_ALL": "true" if force_review.value else "false",
                     })
                     os.environ["KB_CONFIDENCE_LOW"] = str(conf_low.value)
                     os.environ["KB_CONFIDENCE_HIGH"] = str(conf_high.value)
+                    # 调试开关：同步 os.environ 使切换即时生效
+                    # （build_payloads 在调用时读 os.environ["KB_FORCE_REVIEW_ALL"]，无需重启）
+                    new_on = bool(force_review.value)
+                    os.environ["KB_FORCE_REVIEW_ALL"] = "true" if new_on else "false"
+                    # 开关动作记入活动日志（用户要求：开启/关闭都要记录）
+                    log_activity(
+                        "debug_force_review_on" if new_on else "debug_force_review_off",
+                        detail="系统配置页切换「强制所有摄入进待审核」开关",
+                    )
                     ui.notify("✅ 系统配置已保存", type="positive")
 
                 ui.button("💾 保存", on_click=save_sys).props("color=blue")

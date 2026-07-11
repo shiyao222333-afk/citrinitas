@@ -60,6 +60,10 @@ sparse_vocab.json.tmp
 data/inbox/*
 !data/inbox/.gitkeep
 
+# 知识库大文件夹 library/ — 源文件/图片/状态不提交，仅保留目录结构占位
+library/
+!library/.gitkeep
+
 # WorkBuddy 内部目录
 .workbuddy/
 

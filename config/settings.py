@@ -192,10 +192,10 @@ TABLE_SPLIT_THRESHOLD = _yaml_or_env(
 # 守望文件夹 v2（统一收件箱 + 状态追踪）
 # ═══════════════════════════════════════════════════════════════
 WATCH_V2_INBOX_DIR = _yaml_or_env(
-    "watch_v2.inbox_dir", "KB_WATCH_V2_INBOX_DIR", "data/inbox",
+    "watch_v2.inbox_dir", "KB_WATCH_V2_INBOX_DIR", "library/inbox",
 )
 WATCH_V2_STATE_FILE = _yaml_or_env(
-    "watch_v2.state_file", "KB_WATCH_V2_STATE_FILE", "data/file_state.jsonl",
+    "watch_v2.state_file", "KB_WATCH_V2_STATE_FILE", "library/file_state.jsonl",
 )
 WATCH_V2_WRITE_COMPLETE_CHECKS = _yaml_or_env(
     "watch_v2.write_complete_checks", "KB_WATCH_V2_WRITE_COMPLETE_CHECKS", 2, cast=int,
@@ -259,6 +259,19 @@ WATCH_V2_PROCESS_TIMEOUT = _yaml_or_env(
     "watch_v2.process_timeout", "KB_WATCH_V2_PROCESS_TIMEOUT", 30, cast=int,
     validator=lambda v: None if v >= 1 else "must be >= 1",
 )
+
+
+# ── 调试开关：强制所有摄入文件进待审核 ──
+# 通过环境变量 KB_FORCE_REVIEW_ALL 控制（.env 由系统配置页写入）。
+# 运行时读取，切换即时生效、无需重启；详见 pages/config.py 与 ingest_pipeline.build_payloads。
+def is_force_review_all() -> bool:
+    """调试开关：开启后强制所有摄入文件进「待审核」队列（无论词表是否受控）。
+
+    读取环境变量 KB_FORCE_REVIEW_ALL（"true" 开启，其余为关）。
+    系统配置页写入 .env 并同步 os.environ[...]，故切换即时生效、无需重启。
+    用途：全量抽检摄入质量——开启后每条新摄入都先人工过一遍审核页再放行。
+    """
+    return str(os.environ.get("KB_FORCE_REVIEW_ALL", "false")).strip().lower() == "true"
 
 
 def _get_v2_temp_patterns():

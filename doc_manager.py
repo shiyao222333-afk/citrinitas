@@ -9,7 +9,7 @@ import os
 import json
 import requests
 import logging
-from qconst import QDRANT_URL, DEFAULT_COLLECTION, INGEST_LOG_PATH, _check_qdrant
+from qconst import QDRANT_URL, DEFAULT_COLLECTION, INGEST_LOG_PATH, _check_qdrant, PROJECT_DIR, IMAGES_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -391,11 +391,12 @@ def list_documents(collection: str = DEFAULT_COLLECTION,
 
             for p in batch:
                 pl = p.get("payload", {})
-                did = pl.get("doc_uid", "")
+                did = pl.get("doc_id") or pl.get("doc_uid", "")
                 if not did:
                     continue
                 if did not in seen:
                     seen[did] = {
+                        "doc_id": did,
                         "doc_uid": did,
                         "title": pl.get("title", "") or pl.get("source", "未知"),
                         "source": pl.get("source", ""),
@@ -442,40 +443,50 @@ def list_documents(collection: str = DEFAULT_COLLECTION,
         return {"ok": False, "error": str(e)}
 
 
-def get_document(doc_uid: str, collection: str = DEFAULT_COLLECTION) -> dict:
+def _query_doc_points(collection: str, doc_id: str, with_vector: bool = False) -> list:
     """
-    获取指定文档的所有分块。
-    返回：
-        {"ok": True, "doc_uid": "...", "chunks": [{text, ...}, ...]}
+    按 doc_id 取该文档全部 point（兼容迁移前仅有 doc_uid 的旧数据）。
+    先试 doc_id，空结果再试 doc_uid，任一命中即返回。
     """
-    if not _check_qdrant():
-        return {"ok": False, "error": "Qdrant 未运行"}
-
-    try:
-        # 使用 scroll + filter 获取该 doc_uid 的所有 points
-        all_points = []
-        scroll_limit = 1000
+    for key in ("doc_id", "doc_uid"):
+        points = []
         offset = 0
-
+        scroll_limit = 1000
         while True:
-            filter_obj = {"must": [{"key": "doc_uid", "match": {"value": doc_uid}}]}
+            filter_obj = {"must": [{"key": key, "match": {"value": doc_id}}]}
             resp = requests.post(
                 f"{QDRANT_URL}/collections/{collection}/points/scroll",
                 json={"limit": scroll_limit, "offset": offset,
                       "filter": filter_obj,
-                      "with_payload": True, "with_vector": False},
+                      "with_payload": True, "with_vector": with_vector},
                 timeout=30,
             )
             batch = resp.json()["result"]["points"] if resp.status_code == 200 else []
             if not batch:
                 break
-            all_points.extend(batch)
+            points.extend(batch)
             offset += len(batch)
             if len(batch) < scroll_limit:
                 break
+        if points:
+            return points
+    return []
 
+
+def get_document(doc_id: str, collection: str = DEFAULT_COLLECTION) -> dict:
+    """
+    获取指定文档的所有分块。
+    返回：
+        {"ok": True, "doc_id": "...", "chunks": [{text, ...}, ...]}
+    """
+    if not _check_qdrant():
+        return {"ok": False, "error": "Qdrant 未运行"}
+
+    try:
+        # 使用 scroll 获取该文档的所有 points（兼容旧数据 doc_uid）
+        all_points = _query_doc_points(collection, doc_id, with_vector=False)
         if not all_points:
-            return {"ok": False, "error": f"文档 {doc_uid} 不存在"}
+            return {"ok": False, "error": f"文档 {doc_id} 不存在"}
 
         chunks = []
         for p in all_points:
@@ -499,13 +510,41 @@ def get_document(doc_uid: str, collection: str = DEFAULT_COLLECTION) -> dict:
             metadata.pop("chunk_index", None)
             metadata.pop("text", None)
             metadata.pop("images", None)
-        return {"ok": True, "doc_uid": doc_uid, "chunks": chunks, "metadata": metadata}
+        return {"ok": True, "doc_id": doc_id, "doc_uid": doc_id, "chunks": chunks, "metadata": metadata}
 
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
 
-def delete_document(doc_uid: str, collection: str = DEFAULT_COLLECTION) -> dict:
+def _clean_doc_images(points: list) -> int:
+    """
+    删除某文档引用过的图片文件（best-effort，仅限 IMAGES_DIR 内，防误删）。
+    返回删除的文件数。R15 修复：文档从 Qdrant 删时其引用图不再堆积成孤儿。
+    """
+    cleaned = 0
+    seen = set()
+    for p in points:
+        for img in (p.get("payload", {}).get("images") or []):
+            if not isinstance(img, str) or not img:
+                continue
+            raw = img if os.path.isabs(img) else os.path.join(PROJECT_DIR, img)
+            path = os.path.normpath(raw)
+            # 安全护栏：仅删除落在 IMAGES_DIR 内的文件，杜绝任意路径误删
+            if not path.startswith(IMAGES_DIR):
+                continue
+            if path in seen:
+                continue
+            seen.add(path)
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+                    cleaned += 1
+            except Exception:
+                pass
+    return cleaned
+
+
+def delete_document(doc_id: str, collection: str = DEFAULT_COLLECTION) -> dict:
     """
     删除指定文档的所有分块。
     返回：
@@ -515,30 +554,15 @@ def delete_document(doc_uid: str, collection: str = DEFAULT_COLLECTION) -> dict:
         return {"ok": False, "error": "Qdrant 未运行"}
 
     try:
-        # 先获取所有匹配的点 ID
-        point_ids = []
-        scroll_limit = 1000
-        offset = 0
+        # 先获取所有匹配的点 ID（兼容旧数据 doc_uid）
+        points = _query_doc_points(collection, doc_id, with_vector=False)
+        point_ids = [p["id"] for p in points]
 
-        while True:
-            filter_obj = {"must": [{"key": "doc_uid", "match": {"value": doc_uid}}]}
-            resp = requests.post(
-                f"{QDRANT_URL}/collections/{collection}/points/scroll",
-                json={"limit": scroll_limit, "offset": offset,
-                      "filter": filter_obj,
-                      "with_payload": False, "with_vector": False},
-                timeout=30,
-            )
-            batch = resp.json()["result"]["points"] if resp.status_code == 200 else []
-            if not batch:
-                break
-            point_ids.extend([p["id"] for p in batch])
-            offset += len(batch)
-            if len(batch) < scroll_limit:
-                break
+        # 清理该文档引用的图片文件（R15：删除文档时一并清图，避免孤儿图堆积）
+        cleaned = _clean_doc_images(points)
 
         if not point_ids:
-            return {"ok": False, "error": f"文档 {doc_uid} 不存在"}
+            return {"ok": False, "error": f"文档 {doc_id} 不存在"}
 
         # 批量删除（每批 1000）
         deleted = 0
@@ -551,17 +575,147 @@ def delete_document(doc_uid: str, collection: str = DEFAULT_COLLECTION) -> dict:
             )
             if del_resp.status_code == 200:
                 deleted += len(batch_ids)
+            else:
+                # 删除 HTTP 失败：显式报错，不假装成功（与 R12 同款修复）
+                return {"ok": False, "error": f"删除失败: HTTP {del_resp.status_code}"}
 
-        return {"ok": True, "deleted": deleted, "doc_uid": doc_uid}
+        return {"ok": True, "deleted": deleted, "doc_id": doc_id, "doc_uid": doc_id, "images_cleaned": cleaned}
 
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
 
-def update_document(doc_uid: str, metadata: dict,
+def delete_points_by_doc_id(doc_id: str, collection: str = DEFAULT_COLLECTION) -> dict:
+    """
+    按确定性 doc_id 删除该文档的全部向量点（用于强制重录前的清理）。
+
+    与 delete_document 的区别：
+      - 过滤字段为 doc_id（摄入管线写入的确定性文档编号，#21）；
+      - 文档不存在时返回 deleted=0 而非报错（容忍性删除，适配「重录前先清场」场景）。
+
+    返回:
+        {"ok": True, "deleted": N, "doc_id": "..."}
+    """
+    if not _check_qdrant():
+        return {"ok": False, "error": "Qdrant 未运行"}
+    try:
+        point_ids = []
+        scroll_limit = 1000
+        offset = 0
+        while True:
+            filter_obj = {"must": [{"key": "doc_id", "match": {"value": doc_id}}]}
+            resp = requests.post(
+                f"{QDRANT_URL}/collections/{collection}/points/scroll",
+                json={"limit": scroll_limit, "offset": offset,
+                      "filter": filter_obj,
+                      "with_payload": False, "with_vector": False},
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                return {"ok": False, "error": f"查询失败: {resp.status_code}"}
+            batch = resp.json()["result"]["points"]
+            if not batch:
+                break
+            point_ids.extend([p["id"] for p in batch])
+            offset += len(batch)
+            if len(batch) < scroll_limit:
+                break
+
+        if not point_ids:
+            return {"ok": True, "deleted": 0, "doc_id": doc_id}
+
+        deleted = 0
+        for i in range(0, len(point_ids), 1000):
+            batch_ids = point_ids[i:i + 1000]
+            del_resp = requests.post(
+                f"{QDRANT_URL}/collections/{collection}/points/delete",
+                json={"points": batch_ids},
+                timeout=30,
+            )
+            if del_resp.status_code == 200:
+                deleted += len(batch_ids)
+            else:
+                # 删除 HTTP 失败：显式报错，不再假装清理成功（修复 R12）
+                return {"ok": False, "error": f"删除失败: HTTP {del_resp.status_code}"}
+        return {"ok": True, "deleted": deleted, "doc_id": doc_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def delete_orphan_points(doc_id: str, keep_ids: set, collection: str = DEFAULT_COLLECTION) -> dict:
+    """
+    删除某 doc_id 下、不在 keep_ids 集合中的孤儿 point（覆盖更新的「后删」步骤，#31/R11）。
+
+    与 delete_points_by_doc_id 的区别：
+      - 只删「旧版本多出来的高索引块」，绝不删本次新写入的块；
+      - 删除失败返回 ok=False（显式报错，不假装成功）。
+
+    调用方（_step_write_qdrant）已先完成新块 upsert，本函数仅做清理：
+    即便本函数偶发失败，也最多留下旧碎片（无害、下次重录会清），
+    不会因「删成功写失败」而丢失整本文档。
+
+    返回:
+        {"ok": True, "deleted": N, "doc_id": "..."} / {"ok": False, "error": "..."}
+    """
+    if not _check_qdrant():
+        return {"ok": False, "error": "Qdrant 未运行"}
+    if not keep_ids:
+        # 防御：keep_ids 为空时绝不删除任何点（避免误删整篇文档）
+        return {"ok": True, "deleted": 0, "doc_id": doc_id}
+    try:
+        point_ids = []
+        point_map = {}
+        scroll_limit = 1000
+        offset = 0
+        while True:
+            filter_obj = {"must": [{"key": "doc_id", "match": {"value": doc_id}}]}
+            resp = requests.post(
+                f"{QDRANT_URL}/collections/{collection}/points/scroll",
+                json={"limit": scroll_limit, "offset": offset,
+                      "filter": filter_obj,
+                      "with_payload": True, "with_vector": False},
+                timeout=30
+            )
+            if resp.status_code != 200:
+                return {"ok": False, "error": f"查询失败: {resp.status_code}"}
+            batch = resp.json()["result"]["points"]
+            if not batch:
+                break
+            for p in batch:
+                point_ids.append(p["id"])
+                point_map[p["id"]] = p
+            offset += len(batch)
+            if len(batch) < scroll_limit:
+                break
+
+        orphans = [pid for pid in point_ids if pid not in keep_ids]
+        if not orphans:
+            return {"ok": True, "deleted": 0, "doc_id": doc_id}
+
+        # 清理孤儿块引用的图片（R15：重录旧图不再堆积成孤儿）
+        images_cleaned = _clean_doc_images([point_map[pid] for pid in orphans if pid in point_map])
+
+        deleted = 0
+        for i in range(0, len(orphans), 1000):
+            batch_ids = orphans[i:i + 1000]
+            del_resp = requests.post(
+                f"{QDRANT_URL}/collections/{collection}/points/delete",
+                json={"points": batch_ids},
+                timeout=30
+            )
+            if del_resp.status_code == 200:
+                deleted += len(batch_ids)
+            else:
+                return {"ok": False, "error": f"删除孤儿块失败: HTTP {del_resp.status_code}"}
+        return {"ok": True, "deleted": deleted, "doc_id": doc_id, "images_cleaned": images_cleaned}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def update_document(doc_id: str, metadata: dict,
                    collection: str = DEFAULT_COLLECTION) -> dict:
     """
-    更新指定文档所有分块的元数据。
+    更新指定文档所有分块的元数据（key-level merge，不重写向量）。
     metadata 中的字段会覆盖所有分块的对应字段。
 
     返回：
@@ -571,49 +725,22 @@ def update_document(doc_uid: str, metadata: dict,
         return {"ok": False, "error": "Qdrant 未运行"}
 
     try:
-        # 先获取所有匹配的点
-        all_points = []
-        scroll_limit = 1000
-        offset = 0
-
-        while True:
-            filter_obj = {"must": [{"key": "doc_uid", "match": {"value": doc_uid}}]}
-            resp = requests.post(
-                f"{QDRANT_URL}/collections/{collection}/points/scroll",
-                json={"limit": scroll_limit, "offset": offset,
-                      "filter": filter_obj,
-                      "with_payload": True, "with_vector": True},
-                timeout=30,
-            )
-            batch = resp.json()["result"]["points"] if resp.status_code == 200 else []
-            if not batch:
-                break
-            all_points.extend(batch)
-            offset += len(batch)
-            if len(batch) < scroll_limit:
-                break
-
+        # 取该文档所有 point 的 id（兼容旧数据 doc_uid，无需向量）
+        all_points = _query_doc_points(collection, doc_id, with_vector=False)
         if not all_points:
-            return {"ok": False, "error": f"文档 {doc_uid} 不存在"}
+            return {"ok": False, "error": f"文档 {doc_id} 不存在"}
 
-        # 更新 payload
-        updated = 0
-        for p in all_points:
-            pid = p["id"]
-            vector = p.get("vector", [])
-            payload = p.get("payload", {})
-            payload.update(metadata)
-            # 写回 Qdrant（覆盖原 point）
-            requests.put(
-                f"{QDRANT_URL}/collections/{collection}/points",
-                json={
-                    "points": [{"id": pid, "vector": vector, "payload": payload}]
-                },
-                timeout=30,
-            )
-            updated += 1
+        all_ids = [p["id"] for p in all_points]
+        # 用 set_payload 做 key-level merge，保留稠密 + 稀疏向量（修复 R14）
+        put_resp = requests.post(
+            f"{QDRANT_URL}/collections/{collection}/points/payload",
+            json={"payload": metadata, "points": all_ids},
+            timeout=10,
+        )
+        if put_resp.status_code != 200:
+            return {"ok": False, "error": f"更新失败: {put_resp.status_code}"}
 
-        return {"ok": True, "updated": updated, "doc_uid": doc_uid}
+        return {"ok": True, "updated": len(all_points), "doc_id": doc_id, "doc_uid": doc_id}
 
     except Exception as e:
         return {"ok": False, "error": str(e)}

@@ -18,7 +18,7 @@ SIZE_LIMIT_BYTES = SIZE_LIMIT_MB * 1024 * 1024
 # 文件类型注册表：扩展名 → {tier, extraction_method, mime, has_auto_metadata}
 FILE_TYPE_REGISTRY = {
     # ── 层级1: 自带元数据的文件 ──
-    ".epub": {"tier": 1, "extraction": "ebooklib", "mime": "application/epub+zip",
+    ".epub": {"tier": 1, "extraction": "epub_reader", "mime": "application/epub+zip",
               "has_auto_metadata": True},
     ".html": {"tier": 1, "extraction": "bs4", "mime": "text/html",
               "has_auto_metadata": True},
@@ -114,7 +114,7 @@ def detect_file_type(file_path: str) -> dict:
             "ok": bool,
             "tier": 1|2|3|4|"auto"|None,
             "format": "epub"|"pdf"|...,
-            "extraction": "ebooklib"|"direct_read"|...,
+            "extraction": "epub_reader"|"direct_read"|...,
             "has_auto_metadata": bool,
             "mime": "application/pdf"|...,
             "display_name": "PDF 文档"|...,

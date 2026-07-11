@@ -27,14 +27,15 @@ from qconst import (
     OLLAMA_URL, EMBED_MODEL, EMBED_DIM,
     INGEST_SKIP_DUPLICATES, CONFIDENCE_LOW, CONFIDENCE_HIGH,
 )
-from doc_manager import _log_ingest
+from doc_manager import _log_ingest, delete_orphan_points
 from qdrant_client import _ensure_collection
 from text_pipeline import (
     _embed, _chunk_text, _text_hash, _extract_images, _ensure_images_dir,
+    chunk_text_with_positions,
     detect_encoding, extract_text,
 )
 from sparse_encoder import encode_sparse, flush_vocab
-from ingest_pipeline import build_payloads
+from ingest_pipeline import build_payloads, _derive_doc_id
 from utils.activity_log import log_activity
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,19 @@ def _step_qdrant_check(state: dict) -> dict:
     if not _ensure_collection(state["collection"]):
         return {"ok": False, "error": "Qdrant 未运行。请先启动 Qdrant（双击 run.bat）。"}
     return {"ok": True}
+
+
+def _resolve_doc_id(state: dict) -> str:
+    """从 state 解析确定性 doc_id（统一所有录入路线的编号规则）。
+
+    - 有文件路径：路径哈希（书架身份，替换同名文件=更新）
+    - 无文件路径（纯文本/粘贴/死信/OCR）：内容哈希（相同内容=同一编号）
+    - 两者皆无：随机兜底
+    """
+    fp = state.get("file_path") or ""
+    if fp:
+        return _derive_doc_id(fp)
+    return _derive_doc_id(None, state.get("text") or "")
 
 
 def _step_read_content(state: dict) -> dict:
@@ -119,8 +133,9 @@ def _step_dedup(state: dict) -> dict:
                 "duplicate_of": dup_source,
                 "content_hash": content_hash,
             }
-    except Exception:
-        pass  # 去重失败不阻断主流程
+    except Exception as e:
+        # 去重查询失败：不阻断主流程，但必须告警，否则重复会悄悄累积无从排查
+        logger.warning(f"[ingest] 去重查询失败（跳过去重，继续写入）: {e}")
 
     return {"ok": True}
 
@@ -140,11 +155,16 @@ def _step_extract_images(state: dict) -> dict:
 
 
 def _step_chunk(state: dict) -> dict:
-    """Step 5: 将文本切成块"""
-    chunks = _chunk_text(state["text"])
-    if not chunks:
+    """Step 5: 将文本切成块，并记录位置指针（章节/章内段序）。
+
+    state["chunks"] 仍存纯文本列表（供嵌入/稀疏向量消费）；
+    state["chunk_positions"] 存并行位置信息，最终写入 payload。
+    """
+    positions = chunk_text_with_positions(state["text"])
+    if not positions:
         return {"ok": False, "error": "切块后无内容"}
-    state["chunks"] = chunks
+    state["chunks"] = [p["text"] for p in positions]
+    state["chunk_positions"] = positions
     return {"ok": True}
 
 
@@ -225,7 +245,9 @@ def _step_pre_store_hooks(state: dict) -> dict:
 
 def _step_build_payloads(state: dict) -> dict:
     """Step 8: 构建 Qdrant points 列表"""
-    base_meta = state.get("metadata") or {}
+    base_meta = dict(state.get("metadata") or {})
+    # 注入统一解析的 doc_id，确保 build_payloads 与后续写入使用同一编号
+    base_meta["doc_id"] = state.get("doc_id") or base_meta.get("doc_id") or ""
 
     if state.get("field_sources"):
         base_meta["field_sources"] = state["field_sources"]
@@ -242,6 +264,7 @@ def _step_build_payloads(state: dict) -> dict:
         file_path=state.get("file_path") or "",
         source=state.get("source", "unknown"),
         model=state.get("model", EMBED_MODEL),
+        chunk_positions=state.get("chunk_positions"),
     )
     state["points"] = result["points"]
     state["doc_id"] = result["doc_id"]
@@ -252,16 +275,48 @@ def _step_build_payloads(state: dict) -> dict:
 
 
 def _step_write_qdrant(state: dict) -> dict:
-    """Step 9: 将 points 写入 Qdrant"""
+    """Step 9: 将 points 写入 Qdrant（覆盖更新 = 先写新块、后删孤儿）。
+
+    设计（修复 R11/R12）：
+    1. **先 upsert 新块**：新块用确定性 point_id，直接覆盖 0..N-1，无论旧块是否存在都安全。
+       这一步若失败（网络/Qdrant 抖动/超时），直接返回错误且**不碰旧数据**——
+       旧版本完整保留，绝不会「删成功写失败」导致整本文档消失。
+    2. **后删孤儿**：scroll 查该 doc_id 现存的全部 point_id，把不在本次新集合
+       （keep_ids）里的旧高索引块删掉。这一步是「清理」，不是「前置条件」——
+       即便偶发失败，也最多留下无害的旧碎片（下次重录会清），不会丢数据。
+
+    去重拦截（内容完全相同）发生在本步骤之前，故不会误删未重写的内容。
+    """
+    doc_id = state.get("doc_id") or ""
+    points = state.get("points") or []
+    new_ids = [p["id"] for p in points]
+    new_id_set = set(new_ids)
+
+    # 1. 先写新块（upsert，确定性 id 覆盖 0..N-1）
     try:
         resp = requests.put(
             f"{QDRANT_URL}/collections/{state['collection']}/points",
-            json={"points": state["points"]},
+            json={"points": points},
             timeout=30
         )
         resp.raise_for_status()
     except Exception as e:
         return {"ok": False, "error": f"写入 Qdrant 失败: {e}"}
+
+    # 2. 后删孤儿（仅清理旧版本多出来的高索引块；失败仅告警，不影响本次写入）
+    if doc_id and new_ids:
+        try:
+            orphan_res = delete_orphan_points(doc_id, new_id_set, state["collection"])
+            if not orphan_res.get("ok"):
+                logger.warning(
+                    f"[ingest] 清理旧孤儿块失败（不影响本次写入，下次重录会清）: {orphan_res.get('error')}"
+                )
+            elif orphan_res.get("deleted"):
+                logger.info(
+                    f"[ingest] 覆盖更新：已清旧孤儿块 {orphan_res.get('deleted')} 个 (doc_id={doc_id})"
+                )
+        except Exception as e:
+            logger.warning(f"[ingest] 清理旧孤儿块异常（不影响本次写入）: {e}")
     return {"ok": True}
 
 
@@ -311,6 +366,7 @@ def ingest(
     skip_steps: list = None,
     field_sources: dict = None,
     overall_confidence: float = None,
+    force_reingest: bool = False,
 ) -> dict:
     """
     摄入文档到知识库（可编排管线）。
@@ -336,6 +392,9 @@ def ingest(
         skip_duplicates = INGEST_SKIP_DUPLICATES
     if not skip_duplicates:
         skip.add("dedup")
+    if force_reingest:
+        # 强制重录：绕过内容重复拦截（相同内容也要重新入库）
+        skip.add("dedup")
 
     # 嵌入模型：环境变量 KB_EMBED_MODEL 优先（配置页可即时生效），其次参数，再次常量
     model = os.environ.get("KB_EMBED_MODEL") or model or EMBED_MODEL
@@ -356,8 +415,12 @@ def ingest(
         "valid_images": [],
         "doc_id": "",
         "ingested_at": "",
+        "force_reingest": force_reingest,
         "points": [],
     }
+
+    # 统一解析确定性 doc_id（路径 or 内容哈希），所有录入路线共用同一编号规则
+    state["doc_id"] = _resolve_doc_id(state)
 
     try:
         for step_name, step_fn in PIPELINE:
@@ -414,6 +477,7 @@ def ingest_batch(
     skip_steps: list = None,
     field_sources: dict = None,
     overall_confidence: float = None,
+    force_reingest: bool = False,
 ) -> dict:
     """
     批量摄入：多个文件/文本依次走同一管线。
@@ -451,6 +515,7 @@ def ingest_batch(
             skip_steps=skip_steps,
             field_sources=field_sources,
             overall_confidence=overall_confidence,
+            force_reingest=force_reingest,
         )
         results.append(result)
         if result.get("ok"):
