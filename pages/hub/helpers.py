@@ -12,7 +12,7 @@ import kb_query
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DLQ_DIR = os.path.join(PROJECT_DIR, "local_data", "dead_letter")
-INBOX_DIR = os.path.join(PROJECT_DIR, "data", "inbox")
+INBOX_DIR = os.path.join(PROJECT_DIR, "library", "inbox")  # 与 watcher/qconst 一致（修复旧 data/inbox 漂移）
 
 
 def _load_dlq_files() -> list:

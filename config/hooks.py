@@ -24,6 +24,9 @@ state 包含:
     register_hook(my_hook)
 """
 
+import json
+from pathlib import Path
+
 _hooks: list = []
 
 
@@ -36,3 +39,64 @@ def register_hook(hook):
 def get_hooks() -> list:
     """返回当前注册的所有钩子（副本，防止外部修改内部列表）"""
     return list(_hooks)
+
+
+# ── Albedo 中转② 元数据钩子（ADR-005 兑现）────────────────────────────
+# Albedo 把中转②写成 {name}_refined.md（报告）+ {name}_refined.meta.json（机读 ingestion_meta）。
+# 熔知摄入 .md 时，此钩子在「嵌入完成→写 Qdrant」前读取同目录 sidecar，
+# 把 ingestion_meta 合并进 payload（仅填空缺，不覆盖熔知自有分类 → 熔知保留最终裁决权）。
+
+# Albedo ingestion_meta 字段 → Citrinitas payload 字段
+_INGESTION_META_MAP = {
+    "content_type": "content_type",
+    "domain_udc_main": "domain",
+    "domain_udc_code": "udc_code",
+    "domain_label": "domain_label",
+    "temporal_nature": "temporal_nature",
+    "epistemic_status": "epistemic_status",
+    "trust_score": "trust_score",
+    "knowledge_type": "knowledge_type",
+    "target_platform": "target_platform",
+    "language": "language",
+    "is_personal": "is_personal",
+    "access_level": "access_level",
+    "lifecycle": "lifecycle",
+    "project_source": "project_source",
+}
+
+
+def albedo_meta_hook(state: dict) -> dict:
+    """读取 Albedo 中转② sidecar，合并 ingestion_meta 进 state["metadata"]。
+
+    无 sidecar（非 Albedo 产出）则原样返回，对其它摄入零影响。
+    """
+    fp = state.get("file_path") or ""
+    if not fp:
+        return state
+    sidecar = Path(fp).with_suffix(".meta.json")
+    if not sidecar.is_file():
+        return state
+    try:
+        data = json.loads(Path(sidecar).read_text(encoding="utf-8"))
+    except Exception:
+        return state
+    meta = data.get("ingestion_meta") or {}
+    if not isinstance(meta, dict) or not meta:
+        return state
+
+    md = state.setdefault("metadata", {})
+    for src_key, dst_key in _INGESTION_META_MAP.items():
+        val = meta.get(src_key)
+        if val is None or val == "" or val == []:
+            continue
+        # 仅填空缺：熔知已算出的字段优先（最终裁决权）
+        if dst_key not in md or md.get(dst_key) in (None, ""):
+            md[dst_key] = val
+    md["source_project"] = "albedo-refined"
+    if data.get("status"):
+        md["refined_status"] = data["status"]
+    return state
+
+
+# 模块加载即注册（ingest_service._step_pre_store_hooks 会在管线中调用 get_hooks）
+register_hook(albedo_meta_hook)

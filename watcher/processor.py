@@ -426,6 +426,10 @@ def _process_file(filepath: str, cancel_event: threading.Event = None):
     filename = os.path.basename(filepath)
     ext = os.path.splitext(filename)[1].lower()
 
+    # ── Albedo 中转② sidecar（{name}_refined.meta.json）：机读元数据，非待摄入正文，直接跳过 ──
+    if filename.endswith(".meta.json"):
+        return
+
     # ── 书类文件（按格式触发，不靠分类猜测）：摄入前先归档到 library/books/ 永久保留 ──
     # 这样 source_path 自然指向永久源文件，且后续永不删除原件。
     if ext in BOOK_EXTS:
