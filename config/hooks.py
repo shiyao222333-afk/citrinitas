@@ -64,6 +64,12 @@ _INGESTION_META_MAP = {
     "project_source": "project_source",
 }
 
+# 炼真权威字段：必须压过熔知朴素分类。
+# 炼真是「质检关卡」，真实性裁决（epistemic_status / trust_score）归它；
+# 熔知的 AI 分类只是单源朴素推断，不能推翻炼真裁决，否则把关失效。
+# 其余描述性分面（content_type/domain/temporal_nature…）炼真留空，由熔知补。
+_OVERRIDE_FIELDS = {"epistemic_status", "trust_score"}
+
 
 def albedo_meta_hook(state: dict) -> dict:
     """读取 Albedo 中转② sidecar，合并 ingestion_meta 进 state["metadata"]。
@@ -89,9 +95,13 @@ def albedo_meta_hook(state: dict) -> dict:
         val = meta.get(src_key)
         if val is None or val == "" or val == []:
             continue
-        # 仅填空缺：熔知已算出的字段优先（最终裁决权）
-        if dst_key not in md or md.get(dst_key) in (None, ""):
+        if src_key in _OVERRIDE_FIELDS:
+            # 炼真裁决优先：直接覆盖熔知朴素分类（把关不可被绕过）
             md[dst_key] = val
+        else:
+            # 仅填空缺：描述性分面熔知已算出的优先
+            if dst_key not in md or md.get(dst_key) in (None, ""):
+                md[dst_key] = val
     md["source_project"] = "albedo-refined"
     if data.get("status"):
         md["refined_status"] = data["status"]
