@@ -34,7 +34,7 @@ def detect_encoding(file_path: str, sample_size: int = 10000) -> str:
     try:
         from charset_normalizer import detect as chardet_detect
         result = chardet_detect(raw)
-        enc = result.get("encoding", "").strip().lower()
+        enc = (result.get("encoding") or "").strip().lower()
         conf = result.get("confidence", 0)
         if enc and conf >= 0.6:
             enc_map = {
