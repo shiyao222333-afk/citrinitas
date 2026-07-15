@@ -185,7 +185,12 @@ EPISTEMIC_STATUS_OPTIONS = [
 
 # ═══════════════════════════════════════════
 # 知识子类型（knowledge_type）
-# 仅 content_type = "knowledge" 时填写
+# 由 classify_pipeline._derive_knowledge_type 确定性推导（source="rule"）：
+#   - 仅对「知识承载型」content_type 推导（standard/paper/book/legal_doc/knowledge/
+#     video_script/social_post/article/personal_note/project_note/idea）
+#   - 容器型（document/webpage/other/template）结构不适用 → 留空
+#   - 硬类型扫结构/全文本，软类型（易偏差）仅扫标题锚定，多命中按 method>case>principle>concept
+# 不再交给 LLM 兜底，彻底消除同文档多次摄入漂移。
 # ═══════════════════════════════════════════
 KNOWLEDGE_TYPES = {
     "principle":   "原理",

@@ -420,6 +420,93 @@ def _validate_and_normalize_merged(merged: dict) -> dict:
     return merged
 
 
+# ── T5.5: 确定性派生 — knowledge_type / is_personal ──
+# 这两个字段历史上交给非确定 LLM 兜底 → 同文档多次摄入漂移。
+# 现改为纯规则引擎推导（source="rule"），落进 merged 后由 field_sources 诚实溯源，彻底止漂。
+
+# knowledge_type 不适用 content_type（结构容器，无知识子类型可言）
+_KT_CONTAINER_TYPES = {"document", "webpage", "other", "template"}
+
+# 软类型（易偏差型）：仅扫标题锚定创作者意图，避免正文噪音误判
+_KT_SOFT = [
+    ("method",    ["教程", "教学", "如何", "怎么", "步骤", "实操", "sop", "手把手", "保姆级"]),
+    ("case",      ["案例", "实战", "实例", "复盘", "踩坑", "项目记录", "项目经验"]),
+    ("principle", ["原理", "机制", "为什么", "底层", "本质", "揭秘", "底层逻辑"]),
+    ("concept",   ["介绍", "讲解", "概念", "定义", "是什么", "科普", "入门", "详解", "解读"]),
+]
+
+def _derive_knowledge_type(merged: dict, text: str) -> None:
+    """
+    确定性推导 knowledge_type（规则引擎，source='rule'）。
+
+    仅对「知识承载型」content_type 推导；容器型(document/webpage/other/template)留空，
+    由 SMART_DEFAULTS 兜底为空串（结构不适用，非该填"无"）。
+    硬类型从 content_type/文档结构派生（扫全文本，强信号不误判）；
+    软类型仅扫标题候选（锚定创作者意图），多命中按 method>case>principle>concept 优先级。
+    保证任何文档恒有值、零漂移。
+    """
+    ct = merged.get("content_type")
+    ct_val = ct.get("value") if isinstance(ct, dict) else ct
+    if ct_val in _KT_CONTAINER_TYPES:
+        return
+
+    # 标题候选：优先已解析 title，否则取正文前 200 字
+    title_fd = merged.get("title")
+    title_text = title_fd.get("value", "") if isinstance(title_fd, dict) else ""
+    if not title_text:
+        title_text = text[:200]
+    title_lower = title_text.lower()
+    text_lower = text.lower()
+
+    # ── 硬类型（第1层）：结构派生，扫全文本（强信号不误判）──
+    if ct_val == "standard":
+        merged["knowledge_type"] = _make_field("standard", "rule"); return
+    if ct_val in ("paper", "book", "legal_doc"):
+        merged["knowledge_type"] = _make_field("reference", "rule"); return
+    if re.search(r"[A-Za-z]\s*=\s*[\d.]", text) or re.search(r"\$[^$]+\$", text) \
+            or any(k in text_lower for k in ("公式", "方程")):
+        merged["knowledge_type"] = _make_field("formula", "rule"); return
+    if any(k in text_lower for k in ("需求", "规格", "技术规格", "指标要求")):
+        merged["knowledge_type"] = _make_field("requirement", "rule"); return
+    if any(k in text_lower for k in ("工序", "工艺", "制造流程", "操作手册")):
+        merged["knowledge_type"] = _make_field("procedure", "rule"); return
+    if any(k in text_lower for k in ("参数", "指标", "基准值", "统计值", "测量值")):
+        merged["knowledge_type"] = _make_field("data", "rule"); return
+
+    # ── 软类型（第2层）：仅扫标题候选，避免正文噪音误判 ──
+    for val, kws in _KT_SOFT:  # 顺序即优先级 method > case > principle > concept
+        if any(k.lower() in title_lower for k in kws):
+            merged["knowledge_type"] = _make_field(val, "rule"); return
+
+    # ── 兜底 concept（保证恒有值）──
+    merged["knowledge_type"] = _make_field("concept", "rule")
+
+
+# is_personal：内容是否个人观点/主观(True) vs 客观事实(False)
+_IP_SUBJECTIVE = ["我觉得", "我认为", "个人观点", "个人看法", "我的看法", "吐槽", "随笔",
+                  "主观感受", "我个人", "说真的", "实话说", "私以为"]
+_IP_OBJECTIVE = ["百科", "维基", "论文", "标准", "官方文档", "新闻报道", "媒体报道",
+                 "白皮书", "说明书", "技术文档"]
+
+def _derive_is_personal(merged: dict, text: str) -> None:
+    """
+    确定性推导 is_personal（观点 vs 事实，source='rule'）。
+
+    强主观词 → True；强客观词 → False；无信号 → 兜底 False + needs_review=True（待人工确认）。
+    未来炼真增强输出 is_personal 时，可由 config/hooks.py 的 _OVERRIDE_FIELDS 强制覆盖熔知值。
+    """
+    text_lower = text.lower()
+    for k in _IP_SUBJECTIVE:
+        if k.lower() in text_lower:
+            merged["is_personal"] = _make_field(True, "rule"); return
+    for k in _IP_OBJECTIVE:
+        if k.lower() in text_lower:
+            merged["is_personal"] = _make_field(False, "rule"); return
+    # 无信号：兜底 False，标记待审核（不瞎猜，留待人工/炼真最终判定）
+    merged["is_personal"] = _make_field(False, "rule")
+    merged["needs_review"] = _make_field(True, "rule")
+
+
 # ── T6: classify_document() 主函数 ──
 
 def classify_document(text: str, file_metadata: dict = None, project_source: str = "通用") -> dict:
@@ -474,8 +561,9 @@ def classify_document(text: str, file_metadata: dict = None, project_source: str
             missing_facets.append(f)
     
     # 可选字段也尝试让 LLM 补充
+    # knowledge_type / is_personal 已改为确定性规则推导（见 _derive_*），不再交给 LLM 兜底，杜绝漂移
     optional_for_llm = ["keywords", "title", "author", "auto_summary", "trust_score",
-                        "knowledge_type", "udc_code", "is_personal", "lifecycle"]
+                        "udc_code", "lifecycle"]
     missing_optional = [f for f in optional_for_llm if merged.get(f) is None]
     
     all_missing = missing_facets + missing_optional
@@ -491,6 +579,11 @@ def classify_document(text: str, file_metadata: dict = None, project_source: str
             if value is not None and value != "":
                 merged[field] = _make_field(value, "llm")
     
+    # 确定性派生 knowledge_type / is_personal（规则引擎，不依赖 LLM，杜绝漂移）
+    # 必须在 fill_defaults 之前，确保规则值不被默认值覆盖
+    _derive_knowledge_type(merged, text)
+    _derive_is_personal(merged, text)
+
     # 填充默认值
     fill_defaults(merged)
     
@@ -525,6 +618,10 @@ def classify_document(text: str, file_metadata: dict = None, project_source: str
             classification[key] = SMART_DEFAULTS.get(key)
     
     classification["confidence"] = {"overall": overall_conf}
+
+    # needs_review（可能由 _derive_is_personal 无信号兜底时标记）回传，便于下游审核队列捕获
+    nr = merged.get("needs_review")
+    classification["needs_review"] = nr.get("value", False) if isinstance(nr, dict) else False
 
     # ── Layer 0: 系统自动填（language / project_source / source）──
     # 这些字段不参与 file > rule > llm 流程，由系统直接确定

@@ -111,7 +111,7 @@ def _prepare_metadata(base_meta: dict, text: str, source: str, file_path: str) -
         "epistemic_status": facet_norm["epistemic_status"],
         # 生命周期（#41：经枚举守卫归一，避免 AI 写出"草稿中"等花样）
         "lifecycle":      normalize_lifecycle(base_meta.get("lifecycle", "published")),
-        "project_source":  base_meta.get("project_source", ""),
+        "project_source":  base_meta.get("project_source") or "无",
         "udc_code":        base_meta.get("udc_code", ""),
         # 知识管理
         "knowledge_type":  base_meta.get("knowledge_type", ""),
@@ -127,7 +127,7 @@ def _prepare_metadata(base_meta: dict, text: str, source: str, file_path: str) -
         "publish_date":   publish_date,
         "effective_date": effective_date,
         "expiry_date":   expiry_date,
-        "version":        base_meta.get("version", ""),
+        "version":        base_meta.get("version") or "无",
         # 来源
         "author":         author,
         "source_url":     source_url,
@@ -136,11 +136,11 @@ def _prepare_metadata(base_meta: dict, text: str, source: str, file_path: str) -
         "source_path":    file_path or "",
         # 内容创作
         "target_platform": base_meta.get("target_platform", "none"),
-        "related_product": base_meta.get("related_product", ""),
+        "related_product": base_meta.get("related_product") or "无",
         # 系统
         "language":       base_meta.get("language") or _detect_language(text),
         "access_level":   base_meta.get("access_level", "private"),
-        "batch_id":       base_meta.get("batch_id", ""),
+        "batch_id":       base_meta.get("batch_id") or "无",
         "needs_review":   base_meta.get("needs_review", False),
         # 字段来源 + 置信度
         "field_sources":  base_meta.get("field_sources", {}),
