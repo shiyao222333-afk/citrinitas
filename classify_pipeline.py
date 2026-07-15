@@ -262,7 +262,13 @@ def call_llm_for_missing(text: str, missing_fields: list) -> dict:
         ktype_list = "\n".join(f"  - {k}: {v}" for k, v in KNOWLEDGE_TYPES.items())
         field_descriptions.append(f'### knowledge_type — 单选：\n{ktype_list}')
     if "udc_code" in missing_fields:
-        field_descriptions.append('### udc_code — UDC 细分码，如 "621"，不确定留空 ""')
+        subs = _load_udc_subdivisions()
+        sub_list = "\n".join(f"  - {k}: {v.get('label', '')}" for k, v in subs.items())
+        field_descriptions.append(
+            '### udc_code — UDC 细分码（domain 的细分），必须从下列受控词表中选一个最贴切的，'
+            '格式如 "621.3"（含小数点）；其首位数字必须等于你为 domain 选的主类；'
+            '不确定/无合适项留空 ""：\n' + sub_list
+        )
     if "is_personal" in missing_fields:
         field_descriptions.append('### is_personal — true=个人经验/笔记，false=客观内容')
     if "lifecycle" in missing_fields:
@@ -538,28 +544,47 @@ def _derive_is_personal(merged: dict, text: str) -> None:
     merged["needs_review"] = _make_field(True, "rule")
 
 
-# udc_code：从 domain 主类码确定性派生（UDC 细分码，source='rule'）
-# 受控词表 controlled_vocabulary.json 已含主类 0/3/5/6/7/8/9；
-# 仅当主类码本身受控时才填，避免 vocab 清空+送审噪音；其余留空。
-_UDC_CONTROLLED_MAIN = {"0", "3", "5", "6", "7", "8", "9"}
+# ── UDC 同步 ──
+# 正确语义（#60 修正 #37 反向错误）：
+#   udc_code = UDC 细分码（如 "621.3"），由 LLM 从受控词表 udc_subdivisions 中选；
+#   domain   = udc_code 的首位数字（UDC 主类，如 "6"）。
+# udc_code 为空（LLM 不确定）→ domain 回退既有规则/LLM 结果，不被覆盖。
+# 入库时 vocabulary.normalize_udc 校验 udc_code（非词表→清空+送审），杜绝漂移。
 
-def _derive_udc_code(merged: dict) -> None:
-    """
-    确定性派生 udc_code（UDC 细分码，source='rule'）。
+_UDC_SUBDIVISIONS_CACHE = None
 
-    从 domain 主类码派生：domain 由规则引擎稳定产出（不靠 LLM），故 udc_code 零漂移。
-    移除 udc_code 出 optional_for_llm → LLM 永不写 → 漂移消失（本修复 #37）。
-    主类码非受控（1/2）时留空，不瞎猜、不触发 vocab 清空+送审噪音。
+def _load_udc_subdivisions() -> dict:
+    """读取受控词表 udc_subdivisions（带缓存），用于约束 LLM 输出。"""
+    global _UDC_SUBDIVISIONS_CACHE
+    if _UDC_SUBDIVISIONS_CACHE is not None:
+        return _UDC_SUBDIVISIONS_CACHE
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "library", "controlled_vocabulary.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        _UDC_SUBDIVISIONS_CACHE = data.get("udc_subdivisions", {})
+    except Exception as e:
+        logger.warning(f"读取受控词表失败，udc_code 提示词将不含词表: {e}")
+        _UDC_SUBDIVISIONS_CACHE = {}
+    return _UDC_SUBDIVISIONS_CACHE
+
+
+def _sync_domain_from_udc(merged: dict) -> None:
     """
-    domain_fd = merged.get("domain")
-    domain_val = domain_fd.get("value") if isinstance(domain_fd, dict) else domain_fd
-    if not domain_val:
+    由 udc_code 同步 domain：domain = udc_code 的首位数字（UDC 主类）。
+    仅当 udc_code 是受控词表中的有效细分码时才覆盖 domain；
+    否则（空/LLM 幻觉的非受控码）不动 domain，回退规则/LLM 结果。
+    """
+    udc = merged.get("udc_code")
+    udc_val = udc.get("value") if isinstance(udc, dict) else udc
+    if not udc_val:
         return
-    primary = domain_val[0] if isinstance(domain_val, list) else domain_val
-    if not primary:
-        return
-    if primary in _UDC_CONTROLLED_MAIN:
-        merged["udc_code"] = _make_field(primary, "rule")
+    subs = _load_udc_subdivisions()
+    if udc_val not in subs:
+        return  # 非受控细分码 → domain 不随之改动，入库时 vocab 会清空 udc_code
+    primary = udc_val[0]
+    merged["domain"] = _make_field([primary], "rule")
 
 
 # ── T6: classify_document() 主函数 ──
@@ -619,8 +644,9 @@ def classify_document(text: str, file_metadata: dict = None, project_source: str
     
     # 可选字段也尝试让 LLM 补充
     # knowledge_type / is_personal 已改为确定性规则推导（见 _derive_*），不再交给 LLM 兜底，杜绝漂移
+    # udc_code 由 LLM 从受控词表选细分码（#60 修正 #37）；入库时 normalize_udc 校验，非词表清空+送审
     optional_for_llm = ["keywords", "title", "author", "auto_summary", "trust_score",
-                        "lifecycle"]
+                        "lifecycle", "udc_code"]
     missing_optional = [f for f in optional_for_llm if merged.get(f) is None]
     
     all_missing = missing_facets + missing_optional
@@ -640,7 +666,7 @@ def classify_document(text: str, file_metadata: dict = None, project_source: str
     # 必须在 fill_defaults 之前，确保规则值不被默认值覆盖
     _derive_knowledge_type(merged, text)
     _derive_is_personal(merged, text)
-    _derive_udc_code(merged)
+    _sync_domain_from_udc(merged)
 
     # 填充默认值
     fill_defaults(merged)
