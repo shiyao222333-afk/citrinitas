@@ -319,8 +319,8 @@ LICENSE_TYPES = {
 CLASSIFY_RULES = {
     # ── content_type ──
     "content_type": [
-        {"value": "standard", "keywords": ["国标", "标准", "规范", "GB", "ISO", "IEC", "ASTM", "DIN", "JIS"],
-         "patterns": [r"GB/T\s*\d+", r"ISO\s*\d+", r"IEC\s*\d+"]},
+        {"value": "standard", "keywords": ["国家标准", "行业标准", "企业标准", "标准化", "规范文件", "技术规范", "国标"],
+         "patterns": [r"GB/T\s*\d+", r"GB\s*\d+", r"ISO\s*\d+", r"IEC\s*\d+", r"标准(?!的)", r"规范(?!的)"]},
         {"value": "paper", "keywords": ["摘要", "参考文献", "arXiv", "引言", "结论", "abstract", "references"],
          "patterns": [r"doi:\s*10\.", r"arXiv:\s*\d+"]},
         {"value": "book", "keywords": ["前言", "序言", "后记", "目录", "第版"],

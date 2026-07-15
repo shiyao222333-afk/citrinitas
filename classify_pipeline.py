@@ -195,7 +195,14 @@ def extract_file_fields(file_metadata: dict) -> dict:
         if isinstance(kws, str):
             kws = [k.strip() for k in kws.split(",") if k.strip()]
         result["keywords"] = _make_field(kws, "file")
-    
+
+    # platform → content_type（文件来源，优先级高于正文关键词规则）
+    # 来源平台直接决定内容类型（B站=视频脚本），避免正文「标准」等词误判内容类型（fix #36）
+    if not result.get("content_type") and file_metadata.get("platform"):
+        ct = _PLATFORM_CONTENT_TYPE.get(str(file_metadata["platform"]).lower())
+        if ct:
+            result["content_type"] = _make_field(ct, "file")
+
     return result
 
 
@@ -427,6 +434,30 @@ def _validate_and_normalize_merged(merged: dict) -> dict:
 # knowledge_type 不适用 content_type（结构容器，无知识子类型可言）
 _KT_CONTAINER_TYPES = {"document", "webpage", "other", "template"}
 
+# 平台 → 内容类型（文件来源，确定性派生，优先级高于正文关键词规则）
+# 视频/社媒等来源平台直接决定内容类型（B站=视频脚本），避免正文「标准」等词误判内容类型（fix #36）。
+# 未来由炼真在 ingestion_meta 声明 content_type 经 hooks 覆盖（_OVERRIDE_FIELDS 已预留）。
+_PLATFORM_CONTENT_TYPE = {
+    "bilibili": "video_script",
+    "douyin": "video_script",
+    "tiktok": "video_script",
+    "tencent_video": "video_script",
+    "youku": "video_script",
+    "iqiyi": "video_script",
+    "xigua": "video_script",
+    "xiaohongshu": "social_post",
+    "rednote": "social_post",
+    "weibo": "social_post",
+    "weixin": "social_post",
+    "gongzhonghao": "social_post",
+    "mp.weixin.qq.com": "social_post",
+    "zhihu": "article",
+    "juejin": "article",
+    "csdn": "article",
+    "jianshu": "article",
+    "arxiv": "paper",
+}
+
 # 软类型（易偏差型）：仅扫标题锚定创作者意图，避免正文噪音误判
 _KT_SOFT = [
     ("method",    ["教程", "教学", "如何", "怎么", "步骤", "实操", "sop", "手把手", "保姆级"]),
@@ -466,11 +497,11 @@ def _derive_knowledge_type(merged: dict, text: str) -> None:
     if re.search(r"[A-Za-z]\s*=\s*[\d.]", text) or re.search(r"\$[^$]+\$", text) \
             or any(k in text_lower for k in ("公式", "方程")):
         merged["knowledge_type"] = _make_field("formula", "rule"); return
-    if any(k in text_lower for k in ("需求", "规格", "技术规格", "指标要求")):
+    if any(k in text_lower for k in ("技术规格", "需求说明", "规格要求", "指标要求")):
         merged["knowledge_type"] = _make_field("requirement", "rule"); return
     if any(k in text_lower for k in ("工序", "工艺", "制造流程", "操作手册")):
         merged["knowledge_type"] = _make_field("procedure", "rule"); return
-    if any(k in text_lower for k in ("参数", "指标", "基准值", "统计值", "测量值")):
+    if any(k in text_lower for k in ("参数值", "参数表", "指标值", "基准值", "统计数据", "测量数据")):
         merged["knowledge_type"] = _make_field("data", "rule"); return
 
     # ── 软类型（第2层）：仅扫标题候选，避免正文噪音误判 ──
@@ -545,6 +576,8 @@ def classify_document(text: str, file_metadata: dict = None, project_source: str
         file_metadata["author"] = _fm["up_name"]
     if _fm.get("source_url") and not file_metadata.get("source_url"):
         file_metadata["source_url"] = _fm["source_url"]
+    if _fm.get("platform") and not file_metadata.get("platform"):
+        file_metadata["platform"] = _fm["platform"]
 
     # ── Layer 1: 两个源并行跑，互不依赖 ──
     file_fields = extract_file_fields(file_metadata)

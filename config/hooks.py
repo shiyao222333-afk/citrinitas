@@ -66,9 +66,10 @@ _INGESTION_META_MAP = {
 
 # 炼真权威字段：必须压过熔知朴素分类。
 # 炼真是「质检关卡」，真实性裁决（epistemic_status / trust_score）归它；
-# 熔知的 AI 分类只是单源朴素推断，不能推翻炼真裁决，否则把关失效。
-# 其余描述性分面（content_type/domain/temporal_nature…）炼真留空，由熔知补。
-_OVERRIDE_FIELDS = {"epistemic_status", "trust_score"}
+# 此外内容类型 / 标题 / 作者 虽由熔知从文件来源(platform/frontmatter)确定性派生，
+# 但按「馏析数据须经炼真才入熔知」原则，炼真在 ingestion_meta 声明时即为权威，强制覆盖。
+# 炼真未声明（当前默认值）时 hook 跳过，熔知派生值照常生效，无回退。
+_OVERRIDE_FIELDS = {"epistemic_status", "trust_score", "content_type", "title", "author"}
 
 
 def albedo_meta_hook(state: dict) -> dict:
