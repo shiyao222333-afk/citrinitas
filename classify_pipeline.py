@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 from config.classifications import normalize_facet_values, CLASSIFY_RULES
 from search_engine import _call_llm_api, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from utils.llm_helpers import extract_json_block as _extract_json_block
-from text_pipeline import detect_language
+from text_pipeline import detect_language, parse_frontmatter
 
 
 def route_by_confidence(overall_conf: float, conf_low: float, conf_high: float) -> tuple:
@@ -447,6 +447,18 @@ def classify_document(text: str, file_metadata: dict = None, project_source: str
             "raw_response": "LLM原始输出(调试用, 可能为空)",
         }
     """
+    # ── Layer 0.5: 解析中转文件 frontmatter（标题/作者作为文件真相源，抑制 LLM 漂移）──
+    # 单一入口：watch / 网页上传 / 死信重摄入 都经 classify_document，frontmatter 在此统一解析，
+    # 杜绝"漏改某个调用点"导致的标题/作者漂移。调用方已显式传入则保留（watcher/网页上传现状不变）。
+    text, _fm = parse_frontmatter(text)
+    file_metadata = dict(file_metadata or {})
+    if _fm.get("title") and not file_metadata.get("title"):
+        file_metadata["title"] = _fm["title"]
+    if _fm.get("up_name") and not file_metadata.get("author"):
+        file_metadata["author"] = _fm["up_name"]
+    if _fm.get("source_url") and not file_metadata.get("source_url"):
+        file_metadata["source_url"] = _fm["source_url"]
+
     # ── Layer 1: 两个源并行跑，互不依赖 ──
     file_fields = extract_file_fields(file_metadata)
     rule_fields = match_all_rules(text)

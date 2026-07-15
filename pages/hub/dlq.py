@@ -200,7 +200,10 @@ def _show_dlq_upload_dialog(item: dict, refresh_callback):
                             return
 
                         text = extract_result.get("text", "") if isinstance(extract_result, dict) else str(extract_result)
-                        # 分类只取前 5000 字（与 pages/ingest.py 一致），但入库传全文，避免丢数据
+                        # 剥除中转文件 frontmatter 噪音行（与 watcher/网页上传一致），避免污染入库向量
+                        from text_pipeline import parse_frontmatter
+                        clean_text, _ = parse_frontmatter(text)
+                        # 分类用含 frontmatter 的原文（classify_document 内部解析标题/作者，抑制漂移）
                         classify_text = text[:5000] if len(text) > 5000 else text
 
                         auto_meta = {}
@@ -230,7 +233,7 @@ def _show_dlq_upload_dialog(item: dict, refresh_callback):
 
                         result = await asyncio.to_thread(
                             kb_query.ingest,
-                            text=text,
+                            text=clean_text,
                             metadata={
                                 **item.get("metadata", {}),
                                 **cls,
