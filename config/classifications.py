@@ -349,9 +349,9 @@ CLASSIFY_RULES = {
     ],
     # ── temporal_nature ──
     "temporal_nature": [
-        {"value": "evergreen", "keywords": ["公式", "定理", "原理", "定律", "定义", "公理", "基础理论"],
+        {"value": "evergreen", "keywords": ["公式", "定理", "定律", "公理", "原理", "基础理论"],
          "patterns": [r"[A-Za-z]\s*=\s*[\d]", r"σ\s*=", r"F\s*=\s*m"]},
-        {"value": "transient", "keywords": ["新闻", "发布", "趋势", "动态", "最新", "2024", "2025", "2026"],
+        {"value": "transient", "keywords": ["新闻", "趋势", "2024", "2025", "2026"],
          "patterns": [r"\d{4}年\d{1,2}月"]},
         {"value": "timeboxed", "keywords": ["版本", "规范", "指南", "best practice", "最佳实践"]},
     ],

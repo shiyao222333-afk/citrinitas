@@ -538,6 +538,30 @@ def _derive_is_personal(merged: dict, text: str) -> None:
     merged["needs_review"] = _make_field(True, "rule")
 
 
+# udc_code：从 domain 主类码确定性派生（UDC 细分码，source='rule'）
+# 受控词表 controlled_vocabulary.json 已含主类 0/3/5/6/7/8/9；
+# 仅当主类码本身受控时才填，避免 vocab 清空+送审噪音；其余留空。
+_UDC_CONTROLLED_MAIN = {"0", "3", "5", "6", "7", "8", "9"}
+
+def _derive_udc_code(merged: dict) -> None:
+    """
+    确定性派生 udc_code（UDC 细分码，source='rule'）。
+
+    从 domain 主类码派生：domain 由规则引擎稳定产出（不靠 LLM），故 udc_code 零漂移。
+    移除 udc_code 出 optional_for_llm → LLM 永不写 → 漂移消失（本修复 #37）。
+    主类码非受控（1/2）时留空，不瞎猜、不触发 vocab 清空+送审噪音。
+    """
+    domain_fd = merged.get("domain")
+    domain_val = domain_fd.get("value") if isinstance(domain_fd, dict) else domain_fd
+    if not domain_val:
+        return
+    primary = domain_val[0] if isinstance(domain_val, list) else domain_val
+    if not primary:
+        return
+    if primary in _UDC_CONTROLLED_MAIN:
+        merged["udc_code"] = _make_field(primary, "rule")
+
+
 # ── T6: classify_document() 主函数 ──
 
 def classify_document(text: str, file_metadata: dict = None, project_source: str = "通用") -> dict:
@@ -596,7 +620,7 @@ def classify_document(text: str, file_metadata: dict = None, project_source: str
     # 可选字段也尝试让 LLM 补充
     # knowledge_type / is_personal 已改为确定性规则推导（见 _derive_*），不再交给 LLM 兜底，杜绝漂移
     optional_for_llm = ["keywords", "title", "author", "auto_summary", "trust_score",
-                        "udc_code", "lifecycle"]
+                        "lifecycle"]
     missing_optional = [f for f in optional_for_llm if merged.get(f) is None]
     
     all_missing = missing_facets + missing_optional
@@ -616,6 +640,7 @@ def classify_document(text: str, file_metadata: dict = None, project_source: str
     # 必须在 fill_defaults 之前，确保规则值不被默认值覆盖
     _derive_knowledge_type(merged, text)
     _derive_is_personal(merged, text)
+    _derive_udc_code(merged)
 
     # 填充默认值
     fill_defaults(merged)
