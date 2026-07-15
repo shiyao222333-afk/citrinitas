@@ -24,6 +24,7 @@ from .extract import (
     detect_encoding,
     detect_language,
     _detect_language,
+    parse_frontmatter,
 )
 
 # 嵌入

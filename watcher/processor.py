@@ -26,6 +26,7 @@ from text_pipeline import (
     analyze_page_content,
     ocr_image as _ocr_image,
     extract_text as _extract_text,
+    parse_frontmatter as _parse_frontmatter,
 )
 from classify_pipeline import classify_document, route_by_confidence
 from qconst import CONFIDENCE_LOW, CONFIDENCE_HIGH, BOOKS_DIR
@@ -259,13 +260,22 @@ def _do_ocr_fallback(pages: list, filepath: str, filename: str,
 
 
 def _do_classify(full_text: str, filepath: str, filename: str,
-                 retry_count: int, cancel_event: threading.Event) -> tuple:
+                 retry_count: int, cancel_event: threading.Event,
+                 frontmatter_meta: dict = None) -> tuple:
     """AI 分类 + 置信度路由。返回 (metadata, field_sources, overall_conf, needs_review, should_retry, new_retry_count)。"""
     if cancel_event is not None and cancel_event.is_set():
         return None, None, 0.0, False, False, retry_count
 
+    fm = frontmatter_meta or {}
+    file_metadata = {"source_path": filepath}
+    if fm.get("title"):
+        file_metadata["title"] = fm["title"]
+    if fm.get("up_name"):
+        file_metadata["author"] = fm["up_name"]
+    if fm.get("source_url"):
+        file_metadata["source_url"] = fm["source_url"]
     try:
-        classify_result = classify_document(full_text, file_metadata={"source_path": filepath})
+        classify_result = classify_document(full_text, file_metadata=file_metadata)
     except (requests.RequestException, ValueError, KeyError) as e:
         result = _handle_failure(filepath, filename, "classify", str(e), retry_count)
         if result == "retry":
@@ -287,6 +297,8 @@ def _do_classify(full_text: str, filepath: str, filename: str,
     metadata = dict(classification)
     metadata["source_path"] = filepath
     metadata["ingestion_source"] = "watch"
+    if fm.get("source_url"):
+        metadata["source_url"] = fm["source_url"]
 
     needs_review, should_dlq = route_by_confidence(
         overall_conf, CONFIDENCE_LOW, CONFIDENCE_HIGH)
@@ -503,6 +515,9 @@ def _process_file(filepath: str, cancel_event: threading.Event = None):
             all_text_parts = [p.get("text", "") for p in pages]
             full_text = "\n\n".join(all_text_parts)
 
+            # 解析中转文件 frontmatter（标题/作者等），剥除正文里的元数据噪音行
+            full_text, _fm_meta = _parse_frontmatter(full_text)
+
         page_analyses = []
         for p in pages:
             analysis = analyze_page_content(
@@ -523,7 +538,7 @@ def _process_file(filepath: str, cancel_event: threading.Event = None):
             "step": "classify",
         })
         metadata, field_sources, overall_conf, needs_review, should_retry, retry_count = _do_classify(
-            full_text, filepath, filename, retry_count, cancel_event)
+            full_text, filepath, filename, retry_count, cancel_event, _fm_meta)
         if metadata is None:
             if should_retry:
                 time.sleep(WATCH_V2_AUTO_RETRY_DELAY)

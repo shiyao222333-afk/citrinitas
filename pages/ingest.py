@@ -193,10 +193,14 @@ def page_ingest():
                                 ui.button("🚀 开始识别", on_click=on_ocr_start, color="blue")
                             return
                         else:
+                            _fm = {}
                             if isinstance(extract_result, dict):
                                 text = extract_result.get("text", "")
                             else:
                                 text = str(extract_result)
+                            # 解析 Markdown frontmatter（标题/作者等），剥除正文元数据噪音行
+                            from text_pipeline import parse_frontmatter
+                            text, _fm = parse_frontmatter(text)
                             if len(text) > 5000:
                                 ui.notify(
                                     f"文本较长 ({len(text)} 字)，AI 分类仅取前 5000 字分析，但全文会完整入库",
@@ -207,6 +211,16 @@ def page_ingest():
                         auto_meta_result = await asyncio.to_thread(extract_auto_metadata, temp_path, file_type)
                         auto_meta = auto_meta_result.get("flat", {}) if isinstance(auto_meta_result, dict) else {}
                         STATE["auto_metadata"] = auto_meta
+
+                        # 将 frontmatter 的标题/作者并入文件元数据（file 来源，最高优先级，抑制 LLM 漂移）
+                        if _fm:
+                            if _fm.get("title"):
+                                auto_meta["title"] = _fm["title"]
+                            if _fm.get("up_name"):
+                                auto_meta["author"] = _fm["up_name"]
+                            if _fm.get("source_url"):
+                                auto_meta["source_url"] = _fm["source_url"]
+                            STATE["auto_metadata"] = auto_meta
 
                         # ═══ 批量自动摄入（v0.9.0 D5） ═══
                         # 直接走全管道：分类 → 置信度检查 → 入库/待审核/死信

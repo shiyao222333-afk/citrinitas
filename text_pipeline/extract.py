@@ -126,6 +126,49 @@ def detect_language(text: str) -> str:
 # 文本提取
 # ═══════════════════════════════════════════
 
+def parse_frontmatter(text: str):
+    """解析 Markdown/YAML frontmatter（--- 包裹的 YAML 块）。
+
+    返回 (body_without_fm, meta_dict)。
+    - 无 frontmatter / 解析失败 / 结构异常 → (原 text, {})，绝不报错。
+    - 成功 → 剥掉开头 --- 块，返回剩余正文 + 解析出的字典。
+
+    用途：把中转文件（馏析产出）自带的 title/up_name/source_url 等
+    结构化元数据从正文中抽出，交给分类管线当作「文件来源」（最高优先级，
+    不送 LLM 兜底），从而抑制标题/作者被非确定 LLM 重写导致的漂移；
+    同时剥掉正文里的元数据噪音行，避免混进嵌入文本。
+    """
+    import yaml
+    if not text:
+        return text, {}
+    lines = text.split("\n")
+    # 跳过开头空行，定位起始 ---
+    i = 0
+    while i < len(lines) and lines[i].strip() == "":
+        i += 1
+    if i >= len(lines) or lines[i].strip() != "---":
+        return text, {}
+    # 收集 frontmatter 行，直到下一个 ---
+    fm_lines = []
+    j = i + 1
+    while j < len(lines):
+        if lines[j].strip() == "---":
+            break
+        fm_lines.append(lines[j])
+        j += 1
+    else:
+        # 没有闭合的 ---，不是合法 frontmatter
+        return text, {}
+    try:
+        meta = yaml.safe_load("\n".join(fm_lines)) or {}
+    except Exception:
+        return text, {}
+    if not isinstance(meta, dict):
+        return text, {}
+    body = "\n".join(lines[j + 1:])
+    return body, meta
+
+
 def extract_text(file_path: str) -> dict:
     """
     统一文本提取入口。
