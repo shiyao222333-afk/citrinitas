@@ -249,8 +249,8 @@ def page_ingest():
                                 # 死信
                                 dlq_entry = {
                                     "timestamp": datetime.now(timezone.utc).isoformat(),
-                                    "confidence": overall_conf,
-                                    "reason": f"置信度 {overall_conf:.0%} < {conf_low:.0%}",
+                                "ingest_conf": overall_conf,
+                                "reason": f"入库置信度 {overall_conf:.0%} < {conf_low:.0%}",
                                     "content": text[:500],
                                     "metadata": {**auto_meta, **classification},
                                     "source": fname,
@@ -456,15 +456,15 @@ def page_ingest():
                 dlq_data = {
                     "content": ingest_content[:3000],
                     "metadata": metadata,
-                    "confidence": overall_conf,
+                    "ingest_conf": overall_conf,
                     "field_sources": field_sources,
-                    "reason": f"置信度过低（{overall_conf:.2f} < {_conf_low:.2f}），需人工审核",
+                    "reason": f"入库置信度过低（{overall_conf:.2f} < {_conf_low:.2f}），需人工审核",
                     "ingested_at": datetime.now(timezone.utc).isoformat(),
                 }
                 with open(dlq_file, "w", encoding="utf-8") as f:
                     json.dump(dlq_data, f, ensure_ascii=False, indent=2)
                 ui.notify(
-                    f"✋ 置信度过低（{overall_conf:.0%}），已放入死信队列待审核",
+                    f"✋ 入库置信度过低（{overall_conf:.0%}），已放入死信队列待审核",
                     type="warning",
                 )
                 return

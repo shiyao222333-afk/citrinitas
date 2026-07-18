@@ -153,7 +153,7 @@ def _prepare_metadata(base_meta: dict, text: str, source: str, file_path: str) -
         "needs_review":   base_meta.get("needs_review", False),
         # 字段来源 + 置信度
         "field_sources":  base_meta.get("field_sources", {}),
-        "confidence":     base_meta.get("confidence_overall", None),
+        "ingest_conf":    base_meta.get("confidence_overall", None),
         # 图片
         "valid_images":   base_meta.get("_valid_images", []),
         # 扩展槽透传
@@ -321,7 +321,7 @@ def _build_point(chunk: str, vec: list, i: int, total_chunks: int,
         "needs_review":   m["needs_review"],
         # 字段来源 + 置信度
         "field_sources":  m["field_sources"],
-        "confidence":     m["confidence"],
+        "ingest_conf":    m["ingest_conf"],
     }
     # 扩展槽（只写入有值的字段，不写 None）
     for i, val in enumerate([m.get("ext_text1"), m.get("ext_text2"), m.get("ext_text3"),

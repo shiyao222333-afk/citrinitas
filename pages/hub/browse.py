@@ -209,7 +209,7 @@ def _build_doc_card(doc: dict, idx: int, selected_ids: set, on_refresh, on_selec
     domain = doc.get("domain", [])
     temporal = doc.get("temporal_nature", "")
     epistemic = doc.get("epistemic_status", "")
-    confidence = doc.get("overall_confidence", 0)
+    confidence = doc.get("ingest_conf", 0)
     needs_review = doc.get("needs_review", False)
     preview = (doc.get("content_preview") or "")[:150]
     created = doc.get("created_at", "")[:10]
@@ -262,7 +262,7 @@ def _show_doc_quickview(doc: dict):
     domain = doc.get("domain", [])
     temporal = doc.get("temporal_nature", "")
     epistemic = doc.get("epistemic_status", "")
-    confidence = doc.get("overall_confidence", 0)
+    confidence = doc.get("ingest_conf", 0)
     preview = (doc.get("content_preview") or "")[:300]
     created = doc.get("created_at", "")[:19]
 
@@ -281,7 +281,7 @@ def _show_doc_quickview(doc: dict):
         with ui.row().classes("gap-4 mt-2 text-xs text-gray-400"):
             ui.label(f"⏱️ {temporal or 'N/A'}")
             ui.label(f"✅ {epistemic or 'N/A'}")
-            ui.label(f"📊 置信度: {confidence:.0%}")
+            ui.label(f"📊 入库置信度: {confidence:.0%}")
             ui.label(f"📅 {created}")
 
         if preview:

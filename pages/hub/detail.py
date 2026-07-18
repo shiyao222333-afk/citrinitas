@@ -76,7 +76,7 @@ def page_doc_detail(doc_id: str):
             with ui.row().classes("w-full gap-4 mb-3"):
                 ui.markdown("#### ⚙️ 知识管理")
             with ui.row().classes("w-full gap-4 text-sm"):
-                ui.label(f"**置信度**: {doc_meta.get('overall_confidence', 0):.0%}")
+                ui.label(f"**入库置信度**: {doc_meta.get('ingest_conf', 0):.0%}")
                 ui.label(f"**信任分**: {doc_meta.get('trust_score', 3)}/5")
                 ui.label(f"**个人知识**: {'是' if doc_meta.get('is_personal') else '否'}")
                 ui.label(f"**待审核**: {'是' if doc_meta.get('needs_review') else '否'}")

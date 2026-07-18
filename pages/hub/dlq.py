@@ -45,7 +45,7 @@ async def _build_dlq_tab():
 
             # ── 置信度过低 DLQ（JSON 格式）──
             for item in json_items:
-                confidence = item.get("confidence", 0)
+                confidence = item.get("ingest_conf", item.get("confidence", 0))
                 reason = item.get("reason", "未知")
                 content = item.get("content", "")[:200]
                 metadata = item.get("metadata", {})
@@ -59,7 +59,7 @@ async def _build_dlq_tab():
                 with ui.card().classes("w-full"):
                     with ui.row().classes("w-full items-center gap-4"):
                         ui.label(f"📄 {fname}").classes("font-bold flex-1")
-                        ui.badge(f"置信度: {confidence:.0%}", color="red")
+                        ui.badge(f"入库置信度: {confidence:.0%}", color="red")
                         ui.badge("AI 不确定", color="orange")
 
                     ui.label(f"原因: {reason} | 时间: {ingested_at}").classes("text-xs text-gray-400")

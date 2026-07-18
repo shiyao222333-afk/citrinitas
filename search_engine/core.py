@@ -259,7 +259,7 @@ def search(
             "access_level":    payload.get("access_level", "private"),
             "batch_id":        payload.get("batch_id", ""),
             "is_archived":     payload.get("is_archived", False),
-            "confidence":      payload.get("confidence", None),
+            "ingest_conf":     payload.get("ingest_conf", None),
             "field_sources":   payload.get("field_sources", {}),
             "rerank_score":   r.get("rerank_score", None),
             # 书库位置指针（章节 / 段落）——供搜索卡片显示「第X章·标题·第N段」

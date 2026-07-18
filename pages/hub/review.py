@@ -53,7 +53,7 @@ def _build_review_card(doc: dict, on_refresh):
     doc_uid = doc.get("doc_id") or doc.get("doc_uid", "?")
     title = doc.get("title") or "未命名"
     source = doc.get("source") or doc.get("source_path") or "手动输入"
-    confidence = doc.get("overall_confidence", 0)
+    confidence = doc.get("ingest_conf", 0)
     content_preview = doc.get("content_preview", "")[:200]
     content_type = doc.get("content_type", "?")
     domain = doc.get("domain", [])
@@ -62,7 +62,7 @@ def _build_review_card(doc: dict, on_refresh):
     with ui.card().classes("w-full"):
         with ui.row().classes("w-full items-center gap-4"):
             ui.markdown(f"**{title}**").classes("flex-1")
-            ui.badge(f"置信度: {confidence:.0%}", color="orange" if confidence < 0.60 else "blue")
+            ui.badge(f"入库置信度: {confidence:.0%}", color="orange" if confidence < 0.60 else "blue")
 
         ui.label(f"来源: {source}").classes("text-xs text-gray-400")
         ui.label(f"类型: {content_type} | 领域: {domain_str}").classes("text-xs text-gray-400")

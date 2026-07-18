@@ -371,8 +371,8 @@ def _do_post_ingest(filepath: str, filename: str, retention: dict,
             "file": filename,
             "state": "needs_review",
             "step": "classify",
-            "error": f"置信度 ({overall_conf:.2f}) 低于高阈值 ({CONFIDENCE_HIGH})",
-            "confidence": overall_conf,
+            "error": f"入库置信度 ({overall_conf:.2f}) 低于高阈值 ({CONFIDENCE_HIGH})",
+            "ingest_conf": overall_conf,
         })
         with _stats_lock: _watch_stats["needs_review"] += 1
 
@@ -418,7 +418,7 @@ def _do_post_ingest(filepath: str, filename: str, retention: dict,
                 "state": "needs_review",
                 "file_deleted": True,
                 "step": "classify",
-                "confidence": overall_conf,
+                "ingest_conf": overall_conf,
             })
     else:
         _remove_state(filename)
