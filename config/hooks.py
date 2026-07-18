@@ -54,7 +54,8 @@ def get_hooks() -> list:
 #
 # 仅当 frontmatter 含 albedo 签名(refined_status)才生效，对其它摄入零影响。
 
-# §3.2 契约字段（frontmatter 键 = payload 字段，1:1；全部强制覆盖）
+# §3.2 契约字段（frontmatter 键 = payload 字段，1:1；全部强制覆盖）。
+#   权威定义（唯一）：albedo-citrinitas-handoff-spec.md（Claw 工作区根目录）§3.2；字段增减必须回该文档更新。
 _CONTRACT_KEYS = {
     "content_type", "temporal_nature", "epistemic_status", "trust_score",
     "knowledge_type", "is_personal", "subject", "keywords", "auto_summary",

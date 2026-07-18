@@ -5,6 +5,7 @@
 >
 > **Citrinitas 是 OpusMagnum（巨作）一人公司蓝图的一环**：
 > Nigredo(视频→文字) → Albedo(验真·提质) → Citrinitas(知识引擎·存储) → Rubedo(变现)
+> 📋 炼真↔熔知 字段交接的**唯一权威文档**为 `albedo-citrinitas-handoff-spec.md`（Claw 工作区根目录）；熔知解析炼真 frontmatter 字段的契约以它为准，不在本蓝图展开。
 
 ## 愿景
 
