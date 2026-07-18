@@ -40,6 +40,8 @@ Extracted from kb_query.py (v0.7.0 B1 refactor).
   不负责: 文本提取、分块、嵌入计算、Qdrant 写入（由 kb_query.ingest() 协调）
 """
 import hashlib
+import json
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
@@ -49,6 +51,10 @@ from text_pipeline import _text_hash, _detect_language
 from config.normalize import normalize_facet_values, normalize_lifecycle
 from vocabulary import normalize_free_text_fields  # #28 受控词表校验（#37 挂载点）
 from config.settings import is_force_review_all  # 调试开关：强制所有摄入进待审核
+from search_engine import _call_llm_api, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from utils.llm_helpers import extract_json_block as _extract_json_block
+
+logger = logging.getLogger(__name__)
 
 
 def _derive_doc_id(file_path: str = None, text: str = None) -> str:
@@ -166,6 +172,80 @@ def _prepare_metadata(base_meta: dict, text: str, source: str, file_path: str) -
         "ext_date2": base_meta.get("ext_date2"),
         "ext_date3": base_meta.get("ext_date3"),
     }
+
+
+def _backfill_subject_keywords(text: str, metadata: dict) -> None:
+    """炼真↔熔知 handoff 缺口兜底（用户决策 2026-07-17）。
+
+    炼真只产契约强制键（content_type / epistemic_status / trust_score / refined_status /
+    auto_summary / ext_*）。subject（视频题材）与 keywords（视频关键词）是语义派生字段，
+    炼真不产，交由熔知在 build_payloads 唯一汇合点用 LLM 兜底。
+    仅当上游未提供（空）时才调用，避免覆盖炼真/用户已填值；LLM 失败则静默留空（优雅降级）。
+    """
+    need_subject = not str(metadata.get("subject") or "").strip()
+    need_keywords = not (metadata.get("keywords") or [])
+
+    if not need_subject and not need_keywords:
+        return
+
+    api_key = os.environ.get("KB_LLM_API_KEY") or LLM_API_KEY
+    if not api_key:
+        return
+
+    sample = text[:5000].strip()
+    if not sample:
+        return
+
+    want = []
+    example = {}
+    if need_subject:
+        want.append(
+            "### subject — 这条内容的「题材/主题领域」（如：编程教程、商业思维、"
+            "游戏实况、美食探店、职场经验），用 2-8 个字概括，不要写成长句"
+        )
+        example["subject"] = "题材示例"
+    if need_keywords:
+        want.append(
+            "### keywords — 3-8 个核心关键词/术语（JSON 数组），覆盖主要内容话题，"
+            "不要写整句"
+        )
+        example["keywords"] = ["关键词1", "关键词2"]
+
+    prompt = (
+        "你是一个内容理解助手。请分析以下文本，只填写要求的字段。\n\n"
+        f"## 文本内容\n{sample}\n\n"
+        "## 需要填写的字段\n" + "\n".join(want) + "\n\n"
+        "## 输出格式\n严格输出以下 JSON，不要包含任何额外文字、不要用 ```json 包裹：\n"
+        + json.dumps(example, ensure_ascii=False)
+    )
+
+    try:
+        raw = _call_llm_api(
+            [{"role": "user", "content": prompt}],
+            base_url=os.environ.get("KB_LLM_BASE_URL") or LLM_BASE_URL,
+            api_key=api_key,
+            model=os.environ.get("KB_LLM_MODEL") or LLM_MODEL,
+        )
+    except Exception as e:
+        logger.warning(f"_backfill_subject_keywords LLM failed: {e}")
+        return
+
+    result = _extract_json_block(raw)
+    if not result:
+        return
+
+    fs = metadata.get("field_sources") or {}
+    if need_subject:
+        subj = str(result.get("subject") or "").strip()
+        if subj:
+            metadata["subject"] = subj[:60]
+            fs["subject"] = "llm"
+    if need_keywords and isinstance(result.get("keywords"), list):
+        kws = [str(x).strip() for x in result["keywords"] if str(x).strip()][:8]
+        if kws:
+            metadata["keywords"] = kws
+            fs["keywords"] = "llm"
+    metadata["field_sources"] = fs
 
 
 def _build_point(chunk: str, vec: list, i: int, total_chunks: int,
@@ -308,6 +388,10 @@ def build_payloads(
     # 故一处接入同时覆盖两者；doc_id 用于日志定位。
     # 关键一步：把 AI 标签对照词表归一（不在表里的进待审核队列）
     normalize_free_text_fields(metadata, doc_id)
+    # 炼真↔熔知 handoff 缺口兜底（用户决策 2026-07-17）：subject(题材)/keywords(关键词)
+    # 炼真不产，此处用 LLM 在两条摄入路线唯一汇合点兜底。放在 normalize 之后，避免 LLM
+    # 派生的语义关键词被受控词表校验误判进「待审核」；仅当上游未提供时才调 LLM。
+    _backfill_subject_keywords(text, metadata)
     # 调试开关：开启后强制所有摄入文件进待审核队列（build_payloads 是两条摄入路线唯一汇合点，一处接入全覆盖）
     if is_force_review_all():
         metadata["needs_review"] = True
