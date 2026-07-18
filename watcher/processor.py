@@ -391,19 +391,27 @@ def _do_post_ingest(filepath: str, filename: str, retention: dict,
             source=filename,
         )
     else:
-        try:
-            os.remove(filepath)
+        # 验收开关：KB_KEEP_INBOX=1 时跳过删除，保留中转②供验收流程读取/复制
+        if os.environ.get("KB_KEEP_INBOX", "") in ("1", "true", "yes"):
             log_activity(
-                action="watch_deleted",
-                detail=f"删除原文件: {retention['reason']}",
+                action="watch_kept",
+                detail="验收保留：KB_KEEP_INBOX 开启，跳过删除原文件",
                 source=filename,
             )
-        except OSError as e:
-            log_activity(
-                action="watch_delete_failed",
-                detail=f"无法删除原文件: {e}",
-                source=filename,
-            )
+        else:
+            try:
+                os.remove(filepath)
+                log_activity(
+                    action="watch_deleted",
+                    detail=f"删除原文件: {retention['reason']}",
+                    source=filename,
+                )
+            except OSError as e:
+                log_activity(
+                    action="watch_delete_failed",
+                    detail=f"无法删除原文件: {e}",
+                    source=filename,
+                )
 
     log_activity(
         action="watch_processed",
