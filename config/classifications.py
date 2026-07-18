@@ -174,12 +174,14 @@ EPISTEMIC_STATUS = {
     "unverified":     "L0 猜想 — 未验证的假设、个人意见、原始笔记",
     "substantiated":  "L1 逻辑验证通过 — 逻辑自洽，但缺外部实证",
     "corroborated":   "L2 实证验证 — 引用标准/论文/实验数据/法规",
+    "rejected":       "已证伪 — 自相矛盾/经核验确为虚假（卖课谎言等，源自炼真 Albedo）",
 }
 
 EPISTEMIC_STATUS_OPTIONS = [
     ("unverified",    "❓ L0 猜想"),
     ("substantiated", "🔍 L1 逻辑验证"),
     ("corroborated",  "✅ L2 实证验证"),
+    ("rejected",      "🚫 已证伪"),
 ]
 
 

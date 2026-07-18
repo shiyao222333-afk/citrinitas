@@ -122,6 +122,9 @@ def _prepare_metadata(base_meta: dict, text: str, source: str, file_path: str) -
         "relations":      base_meta.get("relations", []),
         "keywords":       base_meta.get("keywords", []),
         "auto_summary":   base_meta.get("auto_summary", ""),
+        # 炼真契约字段（B-only）：题材 + 处理状态，由 hook 强制覆盖注入
+        "subject":        base_meta.get("subject", ""),
+        "refined_status": base_meta.get("refined_status", ""),
         # 时效 + 版本
         "title":          base_meta.get("title") or source,
         "publish_date":   publish_date,
@@ -205,6 +208,9 @@ def _build_point(chunk: str, vec: list, i: int, total_chunks: int,
         "relations":      m["relations"] if isinstance(m["relations"], list) else [],
         "keywords":       m["keywords"] if isinstance(m["keywords"], list) else [],
         "auto_summary":   m["auto_summary"],
+        # 炼真契约字段（B-only）
+        "subject":        m["subject"],
+        "refined_status": m["refined_status"],
         # timeline
         "timeline": {
             "published": m["publish_date"],

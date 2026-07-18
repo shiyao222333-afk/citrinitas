@@ -191,6 +191,11 @@ FUZZY_FACET_MAPPING = {
         "unverified":    "unverified",
         "substantiated": "substantiated",
         "corroborated":  "corroborated",
+        "rejected":      "rejected",
+        "证伪":          "rejected",
+        "已证伪":        "rejected",
+        "虚假":          "rejected",
+        "确认虚假":      "rejected",
     },
     "knowledge_type": {
         # 中文 → 标准 key
