@@ -391,8 +391,8 @@ def _do_post_ingest(filepath: str, filename: str, retention: dict,
             source=filename,
         )
     else:
-        # 验收开关：KB_KEEP_INBOX=1 时跳过删除，保留中转②供验收流程读取/复制
-        if os.environ.get("KB_KEEP_INBOX", "") in ("1", "true", "yes"):
+        # 验收开关：ACCEPTANCE_KEEP_FILES=1 时跳过删除，保留中转②供验收流程读取/复制
+        if os.environ.get("ACCEPTANCE_KEEP_FILES", "") in ("1", "true", "yes"):
             log_activity(
                 action="watch_kept",
                 detail="验收保留：KB_KEEP_INBOX 开启，跳过删除原文件",
@@ -448,6 +448,18 @@ def _process_file(filepath: str, cancel_event: threading.Event = None):
 
     # ── Albedo 中转② sidecar（{name}_refined.meta.json）：机读元数据，非待摄入正文，直接跳过 ──
     if filename.endswith(".meta.json"):
+        return
+
+    # 重复摄入卫士（AI 设计决策，非用户指令，见 FLOWCHART §5）：
+    # 文件已为终态(done/failed/needs_review)或处理中(processing)时直接返回，
+    # 防止并发/重探测导致同文件被摄入两次（主循环已做状态跳过，此处为防御性双保险）。
+    _cur = _get_file_state(filename)
+    if _cur and _cur.get("state") in ("done", "failed", "needs_review", "processing"):
+        log_activity(
+            action="watch_skip_terminal",
+            detail=f"文件已为终态/处理中({_cur.get('state')})，跳过重复摄入",
+            source=filename,
+        )
         return
 
     # ── 书类文件（按格式触发，不靠分类猜测）：摄入前先归档到 library/books/ 永久保留 ──
@@ -618,6 +630,37 @@ def _process_file_with_timeout(filepath: str):
             f"处理超时（>{WATCH_V2_PROCESS_TIMEOUT}秒）",
             retry_count=existing_retry_count,
         )
+
+        # 超时落盘 retry 状态再重入队（AI 设计决策，非用户指令）：
+        # timeout 走 auto_retry 策略，_handle_failure 返回 "retry" 但不写状态，文件仍是 processing 幽灵态；
+        # 主循环已跳过 processing，若不补写 retry 则重入队后永久被跳过、永不重试。
+        # 同时累计重试次数，超过上限降级 needs_review，避免「永远超时→永远重入队」空转。
+        if failure_result == "retry":
+            new_retry = existing_retry_count + 1
+            if new_retry > WATCH_V2_MAX_AUTO_RETRIES:
+                _append_state({
+                    "file": filename,
+                    "state": "needs_review",
+                    "step": "timeout",
+                    "error": f"处理超时重试 {new_retry} 次仍失败，转人工审核",
+                    "retry_count": new_retry,
+                    "failure_type": "timeout",
+                })
+                with _stats_lock: _watch_stats["needs_review"] += 1
+                log_activity(
+                    action="watch_timeout_exhausted",
+                    detail=f"超时重试耗尽，转人工审核: {filename}",
+                    source=filename,
+                )
+            else:
+                _append_state({
+                    "file": filename,
+                    "state": "retry",
+                    "step": "timeout",
+                    "error": f"处理超时（>{WATCH_V2_PROCESS_TIMEOUT}秒），重入队重试 {new_retry}/{WATCH_V2_MAX_AUTO_RETRIES}",
+                    "retry_count": new_retry,
+                    "failure_type": "timeout",
+                })
 
         if failure_result in ("retry", "retry_later"):
             if _queue is not None:

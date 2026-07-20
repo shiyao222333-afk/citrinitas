@@ -112,6 +112,7 @@ def _processing_loop(queue: Queue, stop_event: threading.Event):
     log_activity(action="watch_started", detail="守望文件夹 处理循环启动")
 
     _scan_existing_files(queue)
+    _reset_processing_states()
     _recover_retry_files(queue, stop_event)
 
     with _stats_lock: _watch_stats["running"] = True
@@ -124,6 +125,9 @@ def _processing_loop(queue: Queue, stop_event: threading.Event):
         try:
             filepath = queue.get(timeout=2.0)
             _queued_files.discard(filepath)
+            # 防御性（AI 设计决策，非用户指令）：同文件重复入队时已在处理中，跳过防并发双摄入
+            if filepath in _in_flight:
+                continue
             _in_flight.add(filepath)
         except Empty:
             _cleanup_expired_states()
@@ -147,10 +151,13 @@ def _processing_loop(queue: Queue, stop_event: threading.Event):
                 with _stats_lock: _watch_stats["skipped"] += 1
                 continue
 
+            # 防重探测（AI 设计决策，非用户指令，见 FLOWCHART §5 关键不变量）：
+            # 终态(done/failed/needs_review) + 处理中(processing) 一律跳过；
+            # 只放行「无记录(pending)」与「retry」（retry 交 _recover_retry_files 接管）。
             existing_state = _get_file_state(filename)
             if existing_state:
                 existing_status = existing_state.get("state", "")
-                if existing_status in ("failed", "needs_review"):
+                if existing_status in ("done", "failed", "needs_review", "processing"):
                     continue
 
             infra = _check_infra()
@@ -206,14 +213,23 @@ def _processing_loop(queue: Queue, stop_event: threading.Event):
 # ═══════════════════════════════════════════
 
 def _scan_existing_files(queue: Queue):
-    """扫描 inbox 中已有的文件并加入队列。"""
+    """扫描 inbox 中已有的文件并加入队列。
+
+    防重探测（AI 设计决策，非用户指令，见 FLOWCHART §5）：只入队「状态文件无记录」的新文件；
+    任何有记录的文件(done/processing/failed/retry/needs_review)一律跳过——
+    retry 由 _recover_retry_files 接管，避免与启动复位重复入队造成双摄入。
+    """
     if not os.path.isdir(INBOX_DIR):
         return
 
+    state = _load_state()
     files = []
     for filename in os.listdir(INBOX_DIR):
         filepath = os.path.join(INBOX_DIR, filename)
         if os.path.isfile(filepath) and not _is_temp_file(filename) and not filename.startswith("."):
+            # 只入队无状态记录的新文件；有记录的全跳，防重探测
+            if filename in state:
+                continue
             files.append(filepath)
 
     for fp in sorted(files):
@@ -243,7 +259,10 @@ def _rescue_orphaned_files(queue: Queue):
         if _is_temp_file(filename) or filename.startswith("."):
             continue
         entry = state.get(filename)
-        if entry and entry.get("state") in ("failed", "needs_review", "done"):
+        # 防重探测（AI 设计决策，非用户指令，见 FLOWCHART §5）：
+        # 终态(done/failed/needs_review) + 处理中(processing) 跳过；
+        # retry 仍允许救回（基础设施恢复后由本函数重新入队），无记录新文件照常救回。
+        if entry and entry.get("state") in ("done", "failed", "needs_review", "processing"):
             continue
         if filepath in _queued_files or filepath in _in_flight:
             continue
@@ -279,6 +298,31 @@ def _fix_incomplete_states():
         log_activity(
             action="watch_fixed_incomplete",
             detail=f"优雅退出时修复 {fixed} 个未完成状态",
+        )
+
+
+def _reset_processing_states():
+    """启动复位：把崩溃/断电遗留的 processing 状态复位为 retry，交 _recover_retry_files 接管。
+
+    AI 设计决策，非用户指令：保证「崩溃重启不丢不重复」——
+    优雅退出时 _fix_incomplete_states 已把非终态转 retry；但 kill -9 / 断电时
+    processing 记录会残留在状态文件里，本函数补上这最后一道复位（见 FLOWCHART §5 关键不变量）。
+    """
+    state = _load_state()
+    reset = 0
+    for fname, entry in state.items():
+        if entry.get("state") == "processing":
+            _append_state({
+                "file": fname,
+                "state": "retry",
+                "step": "startup_reset",
+                "error": "崩溃/重启复位 processing → retry",
+            })
+            reset += 1
+    if reset > 0:
+        log_activity(
+            action="watch_reset_processing",
+            detail=f"启动复位 {reset} 个 processing 状态为 retry",
         )
 
 
@@ -378,8 +422,15 @@ def _cleanup_expired_states():
                     except ValueError:
                         pass
                 if expired:
-                    expired_removed += 1
-                    continue
+                    # 防重探测（AI 设计决策，非用户指令，见 FLOWCHART §5 关键不变量）：
+                    # 终态记录(done/failed/needs_review)若文件仍在 inbox，保留——
+                    # 否则 TTL 把该记录删掉后，文件变回「无记录的新文件」被重新拾取=重探测。
+                    # 文件已不在 inbox（用户手动删/已删）时才允许正常过期清理。
+                    if entry.get("state") in ("done", "failed", "needs_review") and os.path.isfile(os.path.join(INBOX_DIR, fname)):
+                        pass  # 保留：不计入过期，走下方 last_line_nums 正常保留最后一条
+                    else:
+                        expired_removed += 1
+                        continue
 
                 if fname in last_line_nums:
                     dedup_saved += 1

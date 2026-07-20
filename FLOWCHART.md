@@ -98,7 +98,7 @@ flowchart TB
 
 | 节点 | 名称 | 输入 | 输出 | 逻辑 | 对应任务 |
 |:--:|------|------|------|------|:--:|
-| F_WATCH | 守望v2 | library/inbox/ 统一收件箱 | 文件→处理管线 | 统一收件箱 + library/file_state.jsonl 状态追踪；15故障×5策略(WLNK+逐页分析)；内容驱动保留(v1旧目录启动时自动迁移) | Task 1-6 |
+| F_WATCH | 守望v2 | library/inbox/ 统一收件箱 | 文件→处理管线 | 统一收件箱 + library/file_state.jsonl 状态追踪；15故障×5策略(WLNK+逐页分析)；内容驱动保留(v1旧目录启动时自动迁移)；状态机见第五节 | Task 1-6 |
 | F1 | 拖入文件 | 本地文件 | 原始内容 | 用户拖入/选择 | 1h |
 | F3 | 手动输入 | 键盘/剪贴板 | 原始内容 | 用户打字 | 1i |
 | F4 | OCR图片 | 图片/扫描文档 | 原始图像 | PaddleOCR | — |
@@ -120,7 +120,7 @@ flowchart TB
 | N7 | ⑤ 存储 | 文本+标签+元数据 | 向量索引+文档注册 | metadata_source + source_path 写入（书类指向 library/books/ 持久化源文件，v1.2.x）<br/>含预存储钩子（Nigredo 接口）| v0.4.0, v0.7.0(B4) |
 | N_PAGES | ⑥ 逐页分析 | 多页文档各页内容 | 每页可删性判断 | analyze_page_content() 5信号:非文本元素/密度/OCR可靠性/提取完整度/内容等效性 | Task 3-4 |
 | DL_CONF | ☠ 置信度死信 | 低置信度元数据 | JSON 文件 | 置信度<0.40→移入 local_data/dead_letter/ | v0.4.5 |
-| INBOX_FAILED | 📥 收件箱失败 | 处理失败的文件 | 留在 library/inbox/ + library/file_state.jsonl 条目 | library/file_state.jsonl 记录 state:failed/needs_review/retry; 15故障×5策略(自动重试/等待基础设施/DLQ/审核/跳过) | Task 5 |
+| INBOX_FAILED | 📥 收件箱失败 | 处理失败的文件 | 留在 library/inbox/ + library/file_state.jsonl 条目 | library/file_state.jsonl 记录 state:failed/needs_review/retry；processing 状态防重探测（见第五节）；15故障×5策略(自动重试/等待基础设施/DLQ/审核/跳过) | Task 5 |
 | KEEP | 📥 保留原文件 | 含非文本元素的文件 | 保留在 library/inbox/ | WLNK:任一页不可删→保留整个文件 | Task 4 |
 | DELETE | 🗑 删除原文件 | 全部页面纯文本 | 删除原文件 | WLNK:全部页面可删→内容已入库，可删原文件 | Task 4 |
 | N_PRE | 预处理 | 解码后全文 | 清洗后文本 | 自动纠错 + 统一语言翻译 + 去除广告/抓取残留（v1.5.0 规划） | 未来 |
@@ -287,9 +287,71 @@ flowchart LR
 
 ---
 
-*版本: v6 | 最后更新: 2026-06-23*
+## 五、守望状态机（file_state.jsonl）
+
+> 熔知「一目录 + 状态文件」约定的核心：统一收件箱 `library/inbox/` **永不移动文件**，每个文件在 `library/file_state.jsonl` 有一条状态记录；所有"发现文件"的入口据此决定"是否拾取"。
+> 这是根治"重探测 / 重复摄入"的机制——文件只靠状态区分"在干嘛"，不靠移动到子目录。
+
+### 状态定义
+
+| 状态 | 含义 | 物理位置 | 拾取资格 |
+|------|------|----------|:--:|
+| `pending` | 无状态记录（新文件落入 inbox） | inbox | ✅ 可拾取 |
+| `processing` | 处理中（extract / classify / ingest 各阶段） | inbox | ❌ 跳过（防重探测） |
+| `retry` | 需重试（超时 / 基础设施恢复 / 自动重试未耗尽） | inbox | ✅ 可拾取 |
+| `done` | 已入库（或重复跳过） | inbox（保留）或已删 | ❌ 跳过 |
+| `failed` | 处理失败，保留原文件待手动处理 | inbox | ❌ 跳过 |
+| `needs_review` | 置信度中档，待人工审核 | inbox | ❌ 跳过 |
+
+### 状态转移
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending : 新文件落入 inbox
+    pending --> processing : 被拾取
+    processing --> done : 成功入库
+    processing --> needs_review : 置信度中档
+    processing --> failed : 失败(自动重试耗尽)
+    processing --> retry : 失败(等基础设施) / 超时
+    processing --> needs_review : 置信度过低
+    retry --> processing : 恢复后重新拾取
+    failed --> [*] : 用户手动处理(留 inbox)
+    needs_review --> done : 人工确认
+    note right of processing
+        各阶段(extract/classify/ingest)
+        均写 processing 状态
+    end note
+    note right of retry
+        超时须先写 retry 状态再重入队，
+        消除 processing 幽灵态
+    end note
+```
+
+### 拾取资格统一规则（防重探测核心）
+
+所有"发现文件"的入口，统一只认 `pending`（无记录）与 `retry`；其余一律跳过：
+
+| 入口 | 动作 |
+|------|------|
+| `_scan_existing_files`（启动全扫） | 只入队「状态文件无记录」的新文件；有记录的(done/processing/failed/retry/needs_review)全跳过 |
+| `_rescue_orphaned_files`（周期救孤儿） | 只救「状态文件无记录」的新文件 + `retry` 状态文件（基础设施恢复后重入队）；`done`/`failed`/`needs_review`/`processing` 跳过 |
+| 主循环 `_processing_loop` | 只处理「无记录」+ `retry`；`processing`/`done`/`failed`/`needs_review` 一律跳过 |
+| `_recover_retry_files`（重试恢复） | 只恢复 `retry` 状态文件 |
+| `WatchHandler.on_created/on_moved`（落入即入队） | 新文件无记录 → 直接入队（天然新文件） |
+
+### 关键不变量
+
+- **文件永不离开 inbox**：失败文件留 inbox 由状态标记，收件箱 UI 实时可见、可手动处理。
+- **崩溃/重启不丢不重复**：优雅退出时非终态→`retry`；崩溃遗留 `processing` 启动时复位为 `retry` 交 `_recover_retry_files` 接管。
+- **TTL 清理只清"过期且文件已不在 inbox"的记录**：终态(failed/needs_review/done)只要文件仍在 inbox，记录保留→不会变回 `pending` 被重新拾取（防重探测的最后一道闸；由 `_cleanup_expired_states` 实施）。
+- 原始模块：`watcher_v2.py`（旧名单文件，v1.0.1 已重构为 `watcher/` 包：listener.py / processor.py / failures.py / state.py）。
+
+---
+
+*版本: v7 | 最后更新: 2026-07-20*
 
 *变更记录:*
+- v7: 新增第五节「守望状态机」——file_state.jsonl 的状态定义/转移/拾取资格统一规则（一目录+状态文件，防重探测）；watcher_v2.py 标注为旧名单文件（v1.0.1 已重构为 watcher/ 包）。
 - v6: 守望 v2 — F_WATCH 改为统一收件箱(inbox/ + file_state.jsonl)；DL_WATCH/PROC 删除，替换为 INBOX_FAILED(15故障×5策略)+N_PAGES(WLNK逐页分析)+KEEP/DELETE(内容驱动保留)；新增收件箱标签页节点。
 - v5: 新增 F_WATCH（守望文件夹）入口节点、DL_WATCH（守望死信）+ DL_CONF（置信度死信）双 DLQ、PROC（已处理）节点及连线。置信度路由三档化（高/中/低）。标记 N_UPDATE 未实现。新增提取异常→DL_WATCH 连线。
 - v4: 按功能域拆分为四张独立子图（摄入/搜索/知识库管理/系统保障），每张自含节点定义+连线表。总览图改为文本框图。
