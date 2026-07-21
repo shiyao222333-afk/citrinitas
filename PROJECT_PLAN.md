@@ -3,7 +3,7 @@
 > 功能路线图 + 设计决策。版本变更记录见 `CHANGELOG.md`，Bug 跟踪用 GitHub Issues。
 > 已完成版本的详细记录见 `CHANGELOG.md`，本文件只保留当前状态 + 未来规划。
 
-最后更新: 2026-07-12
+最后更新: 2026-07-21
 
 ---
 
@@ -42,6 +42,21 @@
 | v1.10.0 | 🔮 | 交付 | Git 说明页面 — 版本历史 + 变更记录 + 开发者入口 |
 | v1.11.0 | 🔮 | 交付 | **元关键词聚合（Meta-Keyword）** — 高度相似关键词自动归并为同一概念节点，免维护受控词表（详见「元关键词系统」规划） |
 | v1.12.0 | 🔮 | 重构 | **UDC 细分码（udc_code）重构** — 当前 udc_code 由 LLM 从受控词表选填，仍有偶发漂移（非确定性兜底）；重构为「由 domain 主类确定性派生 + 受控细分码校验」的纯规则路径，彻底消除漂移，与分面重构统一治理 |
+| v1.20.0 | 🔮 | 交付 | **热度/互动数据可检索字段** — 单一 payload 字段 `engagement`（JSON/dict）承载多指标，按 `content_type` 区分指标集（B站视频=播放/点赞/投币/收藏/分享/评论/弹幕计数+完播率等；小红书带货笔记=转化率/下单量/GMV 等）；需 Nigredo 已采集 + Albedo 经 handoff 契约透传 `engagement` 键 |
+
+---
+
+## 热度/互动数据字段（v1.20.0，设计要点）
+
+> 用户拍板（2026-07-21）：热度数据**需要**进熔知（此前按"分析用不入库"暂未存）。设计约束：① **只占一个 payload 字段**，内部用 dict 装多个指标；② **指标集随 content_type 变化**，不同类型文件装的子数据不同。
+
+- **字段**：`engagement`（payload 单字段，JSON/dict）。
+- **类型化指标集（registry，按 content_type 选填，不强求统一键）**：
+  - B站视频（`video_tutorial` / `video_script`）：`play_count` `like_count` `coin_count` `favorite_count` `share_count` `comment_count` `danmaku_count` + `completion_rate` `like_rate` 等。
+  - 小红书带货笔记（`xiaohongshu_promote`）：`conversion_rate` `order_count` `gmv` `click_rate` 等（关注**转化**，非播放）。
+  - 其它类型：dict 预留扩展键，按需添加。
+- **数据流**：Nigredo 已采集互动/播放数据 → Albedo 经 handoff 契约新增 `engagement` 键透传（`report.py` `build_ingestion_frontmatter` 写进 refined frontmatter）→ Citrinitas `ingest_pipeline.py` payload 加 `engagement` 单字段 + 按需要对子键建 Payload Index（支持"按播放量/转化率排序筛选"）。
+- **不做**：不为每种类型各开一个 payload 字段（违反"单字段"约束）；不把原始字幕/评论正文塞进 `engagement`（那是分析依据，非热度指标）。
 
 ---
 
