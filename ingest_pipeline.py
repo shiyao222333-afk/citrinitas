@@ -128,7 +128,7 @@ def _prepare_metadata(base_meta: dict, text: str, source: str, file_path: str) -
         "relations":      base_meta.get("relations", []),
         "keywords":       base_meta.get("keywords", []),
         "auto_summary":   base_meta.get("auto_summary", ""),
-        # 炼真契约字段（B-only）：题材 + 处理状态，由 hook 强制覆盖注入
+        # 炼真契约字段（B-only）：形式题材(subject) + 处理状态，由 hook 强制覆盖注入
         "subject":        base_meta.get("subject", ""),
         "refined_status": base_meta.get("refined_status", ""),
         # 时效 + 版本
@@ -175,12 +175,12 @@ def _prepare_metadata(base_meta: dict, text: str, source: str, file_path: str) -
 
 
 def _backfill_subject_keywords(text: str, metadata: dict) -> None:
-    """炼真↔熔知 handoff 缺口兜底（用户决策 2026-07-17）。
+    """炼真↔熔知 handoff 缺口兜底（v1.2 修正：炼真现产出 subject/keywords）。
 
-    炼真只产契约强制键（content_type / epistemic_status / trust_score / refined_status /
-    auto_summary / ext_*）。subject（视频题材）与 keywords（视频关键词）是语义派生字段，
-    炼真不产，交由熔知在 build_payloads 唯一汇合点用 LLM 兜底。
-    仅当上游未提供（空）时才调用，避免覆盖炼真/用户已填值；LLM 失败则静默留空（优雅降级）。
+    炼真产出的契约强制键（content_type[载体类型] / subject[形式题材] / keywords[视频标签+主题] /
+    epistemic_status / trust_score / refined_status / auto_summary / ext_*）由钩子强制覆盖进 metadata。
+    subject（形式题材）与 keywords（视频标签+主题）炼真已产，熔知此处仅当上游**未提供（空）**时才用
+    LLM 兜底（兼容非 Albedo 文件 / 旧文件）。LLM 失败则静默留空（优雅降级），绝不覆盖已填值。
     """
     need_subject = not str(metadata.get("subject") or "").strip()
     need_keywords = not (metadata.get("keywords") or [])
@@ -388,8 +388,8 @@ def build_payloads(
     # 故一处接入同时覆盖两者；doc_id 用于日志定位。
     # 关键一步：把 AI 标签对照词表归一（不在表里的进待审核队列）
     normalize_free_text_fields(metadata, doc_id)
-    # 炼真↔熔知 handoff 缺口兜底（用户决策 2026-07-17）：subject(题材)/keywords(关键词)
-    # 炼真不产，此处用 LLM 在两条摄入路线唯一汇合点兜底。放在 normalize 之后，避免 LLM
+    # 炼真↔熔知 handoff 缺口兜底（v1.2）：subject(形式题材)/keywords(视频标签+主题) 炼真已产出并由钩子强制覆盖；
+    # 此处仅在熔知自己摄入（非 Albedo 文件）且上游为空时用 LLM 兜底。放在 normalize 之后，避免 LLM
     # 派生的语义关键词被受控词表校验误判进「待审核」；仅当上游未提供时才调 LLM。
     _backfill_subject_keywords(text, metadata)
     # 调试开关：开启后强制所有摄入文件进待审核队列（build_payloads 是两条摄入路线唯一汇合点，一处接入全覆盖）

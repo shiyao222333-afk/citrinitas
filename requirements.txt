@@ -43,5 +43,5 @@ jieba>=0.42
 watchdog>=4.0
 
 # ── OCR ──
-paddlepaddle>=2.6.0
+paddlepaddle-gpu>=2.6.0
 paddleocr>=2.7.0
